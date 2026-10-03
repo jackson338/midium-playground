@@ -18,7 +18,7 @@ A uv project that, on a clean MacBook:
 4. Runs those commissions through a copied UCE reader loop on Midium Cloud.
 5. Writes portable JSONL under `data/traces/`.
 
-Smoke: the same 10 commissions on Laguna S 2.1, Laguna XS 2.1, and Qwen3.8 27B, plus a comparison report. Do not auto-pick a winner.
+Smoke: the same 2 commissions on Laguna XS 2.1, Laguna S 2.1, and Qwen3.8 27B, plus a comparison report. Do not auto-pick a winner.
 
 After a teacher is chosen: about 5,000 episodes from that teacher. A substantial fraction of transcripts must be long enough to train at a 96k context (real file pages, not padding). Drop anything over 96k.
 
@@ -50,7 +50,7 @@ Flash Next writes objectives only. It does not run the reader. Each objective is
 
 ## Smoke
 
-Same 10 commissions on Laguna S 2.1, Laguna XS 2.1, and Qwen3.8 27B via Midium. Score valid tool names and args, paths that exist at the cited lines, stop by round 8, and a report consistent with the tool results. Write `data/traces/smoke_report.json`.
+Same 2 commissions on Laguna XS 2.1, Laguna S 2.1, and Qwen3.8 27B via Midium. Score valid tool names and args, paths that exist at the cited lines, stop by round 8, and a report consistent with the tool results. Write `data/traces/smoke_report.json`.
 
 ## Full set
 

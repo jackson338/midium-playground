@@ -52,6 +52,16 @@ def test_grep_finds_line(tmp_path: Path):
     assert found["matches"][0]["line"] == 1
 
 
+def test_grep_file_path_searches_that_file(tmp_path: Path):
+    (tmp_path / "addon.py").write_text("def keep():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "other.py").write_text("def keep():\n    return 2\n", encoding="utf-8")
+    found = ReaderTools(Workspace(tmp_path)).grep("def keep", path="addon.py")
+    assert found.get("error") is None
+    assert found["count"] == 1
+    assert found["matches"][0]["path"].endswith("addon.py")
+    assert "other.py" not in found["matches"][0]["path"]
+
+
 def test_search_query_is_one_license():
     query = search_query("mit", "Python")
     assert "license:mit" in query
@@ -126,3 +136,84 @@ def test_score_checks_existing_page(tmp_path: Path):
     assert scored["valid_tool_names"] == 1.0
     assert scored["stopped_by_round_8"] == 1.0
     assert scored["cited_lines_exist"] == 1.0
+
+
+def test_parallel_calls_count_toward_the_cap(tmp_path: Path):
+    rounds = [
+        {"round": index // 3, "name": "grep", "arguments": {"pattern": f"p{index}"}, "result": {"matches": []}}
+        for index in range(9)
+    ]
+    scored = score_episode({"report": "done", "tool_rounds": rounds}, tmp_path)
+    assert scored["tool_rounds"] == 9
+    assert scored["stopped_by_round_8"] == 0.0
+
+
+def test_file_grep_and_its_retry_do_not_count(tmp_path: Path):
+    target = tmp_path / "addon.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    rejected = {
+        "name": "grep",
+        "arguments": {"pattern": "VALUE", "path": str(target)},
+        "result": {"error": "not_a_directory", "path": str(target)},
+    }
+    retry = {
+        "name": "grep",
+        "arguments": {"pattern": "VALUE", "path": str(tmp_path)},
+        "result": {"matches": [{"path": "addon.py", "line": 1, "text": "VALUE = 1"}]},
+    }
+    real = [
+        {"name": "read_file", "arguments": {"path": "addon.py", "start_line": "1", "end_line": "1"}, "result": {"content": "VALUE = 1\n", "start_line": 1, "path": "addon.py"}}
+        for _ in range(7)
+    ]
+    rounds = [{"round": 0, **rejected}, {"round": 1, **retry}, *({"round": 2, **item} for item in real)]
+    scored = score_episode({"report": "addon.py defines VALUE.", "tool_rounds": rounds}, tmp_path)
+    assert scored["stopped_by_round_8"] == 1.0
+    assert scored["valid_tool_args"] == 1.0
+    assert scored["report_paths_exist"] == 1.0
+
+
+def test_url_text_is_not_a_report_path(tmp_path: Path):
+    (tmp_path / "addon.py").write_text("x = 1\n", encoding="utf-8")
+    report = "See addon.py and https://api.polyhaven.com for textures."
+    scored = score_episode(
+        {
+            "report": report,
+            "tool_rounds": [
+                {
+                    "round": 0,
+                    "name": "read_file",
+                    "arguments": {"path": "addon.py"},
+                    "result": {"path": "addon.py", "content": "x = 1\n", "start_line": 1},
+                }
+            ],
+        },
+        tmp_path,
+    )
+    assert scored["report_paths_exist"] == 1.0
+
+
+def test_score_trace_reads_saved_episodes(tmp_path: Path):
+    from playground.run import score_trace
+    from playground.traces import append_jsonl
+
+    (tmp_path / "addon.py").write_text("x = 1\n", encoding="utf-8")
+    dest = tmp_path / "teacher.jsonl"
+    append_jsonl(
+        dest,
+        {
+            "id": "saved",
+            "repo": "acme/addon",
+            "report": "addon.py exists.",
+            "tool_rounds": [
+                {
+                    "round": 0,
+                    "name": "read_file",
+                    "arguments": {"path": "addon.py", "start_line": 1, "end_line": 1},
+                    "result": {"path": "addon.py", "content": "x = 1\n", "start_line": 1},
+                }
+            ],
+        },
+    )
+    scored = score_trace(dest, {"saved": tmp_path})
+    assert len(scored) == 1
+    assert scored[0]["stopped_by_round_8"] == 1.0

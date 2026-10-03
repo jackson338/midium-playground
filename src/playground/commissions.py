@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from playground.cloud import CloudError, OpenRouter, parse_json_object
-from playground.config import COMMISSIONS_PATH, SMOKE_COMMISSIONS_PATH, Settings
+from playground.config import COMMISSIONS_PATH, SMOKE_COMMISSIONS, SMOKE_COMMISSIONS_PATH, Settings
 from playground.repos import catalog, clone_all, discover
 from playground.traces import append_jsonl, read_jsonl
 
@@ -82,35 +82,45 @@ async def write_commissions(
 
 
 async def write_smoke_set(cfg: Settings, concurrency: int = 4) -> list[dict]:
-    """Ten commissions, reused for every smoke teacher."""
+    """Two commissions, reused for every smoke teacher."""
     existing = read_jsonl(SMOKE_COMMISSIONS_PATH)
-    if len(existing) >= 10:
-        return existing[:10]
+    if len(existing) >= SMOKE_COMMISSIONS:
+        kept = existing[:SMOKE_COMMISSIONS]
+        if len(existing) > SMOKE_COMMISSIONS:
+            _write_smoke_rows(kept)
+        return kept
     cfg.require_openrouter()
     discovered = await discover(cfg, 8)
     cloned = await clone_all(discovered, concurrency=4)
     ranked = sorted(cloned, key=lambda repo: catalog(Path(repo["path"])).get("long_enough", 0), reverse=True)
     client = OpenRouter(cfg)
-    rows: list[dict] = []
+    rows: list[dict] = list(existing)
     try:
         for repo in ranked:
-            if len(rows) >= 10:
+            if len(rows) >= SMOKE_COMMISSIONS:
                 break
             try:
-                batch = await _objectives_for(client, repo, 10 - len(rows))
+                batch = await _objectives_for(client, repo, SMOKE_COMMISSIONS - len(rows))
             except CloudError as exc:
                 print(f"  skip {repo['full_name']}: {exc}", flush=True)
                 continue
             rows.extend(batch)
     finally:
         await client.aclose()
-    if len(rows) < 10:
-        raise SystemExit(f"Only gathered {len(rows)} smoke commissions; need 10.")
+    if len(rows) < SMOKE_COMMISSIONS:
+        raise SystemExit(
+            f"Only gathered {len(rows)} smoke commissions; need {SMOKE_COMMISSIONS}."
+        )
+    kept = rows[:SMOKE_COMMISSIONS]
+    _write_smoke_rows(kept)
+    return kept
+
+
+def _write_smoke_rows(rows: list[dict]) -> None:
     SMOKE_COMMISSIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SMOKE_COMMISSIONS_PATH.write_text("", encoding="utf-8")
-    for row in rows[:10]:
+    for row in rows:
         append_jsonl(SMOKE_COMMISSIONS_PATH, row)
-    return rows[:10]
 
 
 async def _objectives_for(client: OpenRouter, repo: dict, count: int) -> list[dict]:

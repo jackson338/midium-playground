@@ -8,11 +8,12 @@ The Mac Studio LoRA job does not talk to Midium Cloud or OpenRouter. Copy the tr
 |---|---|
 | `data/repos/` | Shallow clones. Gitignored. Not needed on the Studio. |
 | `data/commissions/commissions.jsonl` | Objectives Flash wrote. One JSON object per line: repo, commit, path, objective, line range. |
-| `data/commissions/smoke.jsonl` | The 10 commissions used for every smoke teacher. |
+| `data/commissions/smoke.jsonl` | The 2 commissions used for every smoke teacher. |
 | `data/traces/smoke_report.json` | Scores for Laguna S 2.1, Laguna XS 2.1, and Qwen3.8 27B. Nothing in this file picks a winner. |
 | `data/traces/smoke/` | Smoke episodes, one JSONL per teacher. |
 | `data/traces/<teacher>.jsonl` | Full set after you choose a teacher. |
 | `data/traces/dry.jsonl` | Scripted dry run. No credentials. |
+| `data/benchmarks/e4b-baseline.json` | Gemma 4 E4B reader baseline. Compare a later label with `benchmark compare`. |
 
 ## One episode
 

@@ -3,6 +3,8 @@
     uv run python -m playground commissions --repos 200 --per-repo 25
     uv run python -m playground smoke
     uv run python -m playground generate --teacher "Laguna S 2.1" --n 5000
+    uv run python -m playground benchmark
+    uv run python -m playground benchmark compare e4b-baseline after-lora
     uv run python -m playground dry-run
 """
 
@@ -19,6 +21,7 @@ from playground.config import (
     SMOKE_REPORT_PATH,
     TEACHERS,
     TRACES_DIR,
+    UCE_WORK_ROOT,
     settings,
 )
 from playground.traces import read_jsonl
@@ -33,7 +36,7 @@ def main() -> None:
     commissions.add_argument("--per-repo", type=int, default=25)
     commissions.add_argument("--concurrency", type=int, default=16)
 
-    smoke = sub.add_parser("smoke", help="Same 10 commissions on all three teachers.")
+    smoke = sub.add_parser("smoke", help="Same 2 commissions on all three teachers, Laguna XS 2.1 first.")
     smoke.add_argument("--concurrency", type=int, default=6)
 
     generate = sub.add_parser("generate", help="Run one chosen teacher. --teacher is required.")
@@ -42,6 +45,15 @@ def main() -> None:
     generate.add_argument("--concurrency", type=int, default=8)
 
     sub.add_parser("dry-run", help="Write a few valid JSONL rows with a scripted reader. No API keys.")
+
+    benchmark = sub.add_parser("benchmark", help="Score local Gemma 4 E4B on the fixed reader suite.")
+    benchmark.add_argument("--label", default="e4b-baseline")
+    benchmark.add_argument("--no-grade", action="store_true")
+    benchmark.add_argument("--work-root", default=str(UCE_WORK_ROOT))
+    bench_sub = benchmark.add_subparsers(dest="bench_cmd")
+    compare = bench_sub.add_parser("compare", help="Show tasks that moved between two reports.")
+    compare.add_argument("before")
+    compare.add_argument("after")
 
     args = parser.parse_args()
     if args.cmd == "commissions":
@@ -65,6 +77,27 @@ def main() -> None:
     if args.cmd == "dry-run":
         _dry_run()
         return
+    if args.cmd == "benchmark":
+        _benchmark(args)
+        return
+
+
+def _benchmark(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from playground.benchmark import compare_reports, run_benchmark
+
+    if args.bench_cmd == "compare":
+        print(compare_reports(args.before, args.after), flush=True)
+        return
+    asyncio.run(
+        run_benchmark(
+            settings(),
+            label=args.label,
+            grade=not args.no_grade,
+            work_root=Path(args.work_root),
+        )
+    )
 
 
 async def _smoke(concurrency: int) -> None:

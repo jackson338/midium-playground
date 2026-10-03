@@ -320,7 +320,7 @@ class ReaderTools:
             return _missing("pattern", "pattern is required — the text or regex to search for.")
         if not regex:
             cleaned = _deescape_substring_pattern(cleaned)
-        root, err = self._walk_root(path, default_to_work_root=True)
+        root, err = self._grep_root(path)
         if err:
             return err
         assert root is not None
@@ -455,6 +455,24 @@ class ReaderTools:
 
         return fetch_url(url, max_chars)
 
+    def _grep_root(self, path: str | None) -> tuple[Path | None, dict | None]:
+        """Directory, or one file. A file path searches that file."""
+        if not (path or "").strip():
+            return self.shell.work_root, None
+        cleaned = (path or "").strip()
+        resolved, err = self.shell.resolve(cleaned, allow_dir=True)
+        if err:
+            return None, err
+        assert resolved is not None
+        if not resolved.exists():
+            return None, {
+                "error": "not_found",
+                "path": cleaned,
+                "cwd": str(self.shell.cwd),
+                "detail": f"Path does not exist: {resolved}",
+            }
+        return resolved, None
+
     def _walk_root(self, path: str | None, *, default_to_work_root: bool) -> tuple[Path | None, dict | None]:
         if default_to_work_root and not (path or "").strip():
             cleaned = str(self.shell.work_root)
@@ -503,57 +521,64 @@ class ReaderTools:
         files_scanned = 0
         truncated = False
 
-        def accept(rel: str, line_no: int, text: str) -> bool:
+        def accept(file_path: Path, rel: str, line_no: int, text: str) -> bool:
             preview = text.rstrip("\n")
             if len(preview) > GREP_LINE_PREVIEW_LIMIT:
                 preview = preview[:GREP_LINE_PREVIEW_LIMIT] + "…"
             matches.append(
                 {
                     "path": rel,
-                    "absolute_path": str(root / rel),
+                    "absolute_path": str(file_path),
                     "line": line_no,
                     "text": preview,
                 }
             )
             return len(matches) < max_results
 
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if not should_skip_dir(d, False)]
-            for name in filenames:
-                if name.startswith("."):
-                    continue
-                if globs and not any(fnmatch.fnmatch(name, g) for g in globs):
-                    continue
-                file_path = Path(dirpath) / name
-                try:
-                    if file_path.stat().st_size > GREP_MAX_FILE_BYTES:
+        def scan(file_path: Path, rel: str) -> None:
+            nonlocal files_scanned, truncated
+            try:
+                if file_path.stat().st_size > GREP_MAX_FILE_BYTES:
+                    return
+            except OSError:
+                return
+            files_scanned += 1
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                return
+            if regex and matcher is not None:
+                for found in matcher.finditer(content):
+                    line_no = content.count("\n", 0, found.start()) + 1
+                    lines = content.splitlines()
+                    preview = lines[line_no - 1] if lines else ""
+                    if not accept(file_path, rel, line_no, preview):
+                        truncated = True
+                        return
+            else:
+                for line_no, line in enumerate(content.splitlines(), 1):
+                    hay = line.lower() if ignore_case else line
+                    if needle in hay and not accept(file_path, rel, line_no, line):
+                        truncated = True
+                        return
+
+        if root.is_file():
+            scan(root, root.name)
+        else:
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if not should_skip_dir(d, False)]
+                for name in filenames:
+                    if name.startswith("."):
                         continue
-                except OSError:
-                    continue
-                files_scanned += 1
-                rel = _rel(root, file_path)
-                try:
-                    content = file_path.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
-                    continue
-                if regex and matcher is not None:
-                    for found in matcher.finditer(content):
-                        line_no = content.count("\n", 0, found.start()) + 1
-                        if not accept(rel, line_no, content.splitlines()[line_no - 1] if content.splitlines() else ""):
-                            truncated = True
-                            break
-                else:
-                    for line_no, line in enumerate(content.splitlines(), 1):
-                        hay = line.lower() if ignore_case else line
-                        if needle in hay:
-                            if not accept(rel, line_no, line):
-                                truncated = True
-                                break
-                if truncated or len(matches) >= max_results:
-                    truncated = len(matches) >= max_results
+                    if globs and not any(fnmatch.fnmatch(name, g) for g in globs):
+                        continue
+                    file_path = Path(dirpath) / name
+                    scan(file_path, _rel(root, file_path))
+                    if truncated or len(matches) >= max_results:
+                        truncated = len(matches) >= max_results
+                        break
+                if truncated:
                     break
-            if truncated:
-                break
         hint = None
         if truncated:
             hint = (
@@ -649,10 +674,11 @@ def _run_ripgrep(
             line_no = int(line_no_str)
         except ValueError:
             continue
+        base = root if root.is_dir() else root.parent
         try:
-            rel = Path(path_str).resolve().relative_to(root).as_posix()
+            rel = Path(path_str).resolve().relative_to(base.resolve()).as_posix()
         except ValueError:
-            rel = path_str
+            rel = Path(path_str).name
         matches.append(
             {
                 "path": rel,
@@ -781,7 +807,10 @@ _TOOL_SCHEMAS: dict[str, dict] = {
         ),
         "properties": {
             "pattern": {"type": "string", "description": "Text or regex to search for. Required."},
-            "path": {"type": "string", "description": "Directory to search. Omit to search the whole workspace."},
+            "path": {
+                "type": "string",
+                "description": "File or directory to search. A file searches only that file. Omit to search the whole workspace.",
+            },
             "file_glob": {"type": "string", "description": "Glob filter such as *.py or *.{ts,tsx}."},
             "regex": {"type": "boolean", "description": "Treat pattern as a regex. Default false."},
             "ignore_case": {"type": "boolean", "description": "Case-insensitive match. Default false."},

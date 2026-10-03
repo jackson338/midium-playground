@@ -18,6 +18,7 @@ packages = ["src/playground"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
 
 [dependency-groups]
 dev = ["pytest>=8"]

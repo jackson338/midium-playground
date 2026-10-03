@@ -5,10 +5,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from playground.config import RESEARCH_MAX_ITERS
 from playground.harness.tools import TOOL_NAMES
 
-_PATH_RE = re.compile(r"[\w./@+-]+\.(?:py|ts|tsx|js|jsx|go|rs|java|rb|c|h|cc|cpp|md|toml|json|yml|yaml)")
-_LINE_RE = re.compile(r"(?:line\s+|:)(\d{1,6})\b", re.IGNORECASE)
+# The extension must end the token. `.com` is not a `.c` file.
+_PATH_RE = re.compile(
+    r"(?<![:\w])[\w./@+-]+\.(?:py|ts|tsx|js|jsx|go|rs|java|rb|cc|cpp|md|toml|json|yml|yaml|c|h)\b"
+)
 
 
 def score_episode(episode: dict, work_root: Path) -> dict:
@@ -22,7 +25,10 @@ def score_episode(episode: dict, work_root: Path) -> dict:
         if name in TOOL_NAMES:
             names_ok += 1
         args = item.get("arguments") or {}
-        if _args_ok(name, args):
+        result = item.get("result") or {}
+        if name == "read_file" and not result.get("error") and "content" in result:
+            args_ok += 1
+        elif _args_ok(name, args):
             args_ok += 1
         if name == "read_file":
             path = args.get("path")
@@ -42,8 +48,7 @@ def score_episode(episode: dict, work_root: Path) -> dict:
     report = episode.get("report") or ""
     report_hits, report_total = _report_paths(work_root, report, rounds)
     n = max(1, len(rounds))
-    max_round = max((int(item.get("round") or 0) for item in rounds), default=-1)
-    stopped = max_round < 8
+    stopped = calls_within_cap(rounds, work_root)
     return {
         "valid_tool_names": names_ok / n if rounds else 1.0,
         "valid_tool_args": args_ok / n if rounds else 1.0,
@@ -56,16 +61,101 @@ def score_episode(episode: dict, work_root: Path) -> dict:
     }
 
 
+def calls_within_cap(rounds: list[dict], work_root: Path, cap: int = RESEARCH_MAX_ITERS) -> bool:
+    """True when the teacher stayed inside the tool budget.
+
+    Each tool call counts. Parallel calls in one assistant message do not
+    share a single slot. A grep the harness rejected because the path was a
+    file, and the directory retry of that same search, do not count.
+    """
+    ignored = _harness_grep_retries(rounds, work_root)
+    counted = sum(1 for index, _item in enumerate(rounds) if index not in ignored)
+    return counted <= cap
+
+
+def _harness_grep_retries(rounds: list[dict], work_root: Path) -> set[int]:
+    rejected: list[int] = []
+    patterns: list[str] = []
+    for index, item in enumerate(rounds):
+        if not _file_grep_rejected(item, work_root):
+            continue
+        rejected.append(index)
+        pattern = (item.get("arguments") or {}).get("pattern")
+        if isinstance(pattern, str) and pattern.strip():
+            patterns.append(pattern)
+    ignored = set(rejected)
+    for index, item in enumerate(rounds):
+        if index in ignored or item.get("name") != "grep" or not patterns:
+            continue
+        pattern = (item.get("arguments") or {}).get("pattern") or ""
+        if not isinstance(pattern, str):
+            continue
+        matched = next((old for old in patterns if _same_search(pattern, old)), None)
+        if matched is None or not _searched_a_directory(item, work_root):
+            continue
+        ignored.add(index)
+        patterns.remove(matched)
+    return ignored
+
+
+def _file_grep_rejected(item: dict, work_root: Path) -> bool:
+    if item.get("name") != "grep":
+        return False
+    result = item.get("result") or {}
+    if result.get("error") != "not_a_directory":
+        return False
+    raw = (item.get("arguments") or {}).get("path") or result.get("path") or ""
+    if not isinstance(raw, str) or not raw.strip():
+        return False
+    path = Path(raw)
+    if not path.is_absolute():
+        path = work_root / path
+    return path.is_file()
+
+
+def _searched_a_directory(item: dict, work_root: Path) -> bool:
+    raw = (item.get("arguments") or {}).get("path")
+    if not isinstance(raw, str) or not raw.strip():
+        return True
+    path = Path(raw)
+    if not path.is_absolute():
+        path = work_root / path
+    return path.is_dir()
+
+
+def _same_search(pattern: str, earlier: str) -> bool:
+    left = pattern.strip()
+    right = earlier.strip()
+    if not left or not right:
+        return False
+    return left == right or left.startswith(right) or right.startswith(left)
+
+
+def _line_number(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
+
 def _args_ok(name: str, args: dict) -> bool:
     if name not in TOOL_NAMES or not isinstance(args, dict):
         return False
     if name == "read_file":
         if not isinstance(args.get("path"), str) or not args.get("path"):
             return False
+        numbers: list[int] = []
         for key in ("start_line", "end_line"):
-            if key in args and not isinstance(args[key], int):
+            if key not in args:
+                continue
+            number = _line_number(args[key])
+            if number is None:
                 return False
-        if "start_line" in args and "end_line" in args and args["end_line"] < args["start_line"]:
+            numbers.append(number)
+        if len(numbers) == 2 and numbers[1] < numbers[0]:
             return False
         return True
     if name in {"grep", "glob", "web_search", "os_bash", "fetch_url", "match_path"}:

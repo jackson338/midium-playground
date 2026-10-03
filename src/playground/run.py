@@ -9,8 +9,9 @@ from pathlib import Path
 from playground.cloud import CloudError, MidiumCloud
 from playground.config import MAX_CONTEXT_TOKENS, Settings, TRACES_DIR
 from playground.harness.loop import run_reader
+from playground.repos import clone_dir
 from playground.score import score_episode, summarize
-from playground.traces import append_jsonl, build_episode, existing_ids
+from playground.traces import append_jsonl, build_episode, existing_ids, read_jsonl
 
 
 def teacher_slug(teacher: str) -> str:
@@ -43,7 +44,6 @@ async def run_teacher(
     written = 0
     dropped = 0
     failed = 0
-    scored: list[dict] = []
 
     async def one(eid: str, item: dict) -> None:
         nonlocal written, dropped, failed
@@ -72,7 +72,6 @@ async def run_teacher(
                 return
             append_jsonl(path, row)
             written += 1
-            scored.append(score_episode(row, Path(item["path"])))
             print(
                 f"  {written} {item['repo']} tokens≈{row['token_estimate']} rounds={len(row['tool_rounds'])}",
                 flush=True,
@@ -82,6 +81,25 @@ async def run_teacher(
         await asyncio.gather(*(one(eid, item) for eid, item in pending))
     finally:
         await cloud.aclose()
-    summary = summarize(scored)
+    roots = {
+        episode_id(item["repo"], item["commit"], item["objective"], teacher): Path(item["path"])
+        for item in commissions
+    }
+    summary = summarize(score_trace(path, roots))
     summary.update({"written": written, "dropped_over_context": dropped, "failed": failed, "path": str(path)})
     return summary
+
+
+def score_trace(path: Path, roots: dict[str, Path]) -> list[dict]:
+    """Score every episode already in the jsonl, not only rows written this run."""
+    if not path.is_file():
+        return []
+    scored = []
+    for row in read_jsonl(path):
+        root = roots.get(row.get("id") or "")
+        if root is None and row.get("repo"):
+            root = clone_dir(str(row["repo"]))
+        if root is None or not Path(root).is_dir():
+            continue
+        scored.append(score_episode(row, Path(root)))
+    return scored

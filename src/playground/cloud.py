@@ -28,15 +28,31 @@ def served_model_name(model: str) -> str:
 
 
 class MidiumCloud:
-    def __init__(self, cfg: Settings, model: str, timeout: float = 180.0):
+    def __init__(
+        self,
+        cfg: Settings,
+        model: str,
+        timeout: float = 180.0,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ):
         self.model = served_model_name(model)
-        self.base = cfg.midium_base_url.rstrip("/") + "/"
+        key = cfg.midium_api_key if api_key is None else api_key
+        base = cfg.midium_base_url if base_url is None else base_url
+        self.base = base.rstrip("/") + "/"
         self.timeout = timeout
         self._client = httpx.AsyncClient(
             base_url=self.base,
-            headers={"Authorization": f"Bearer {cfg.midium_api_key}"},
+            headers={"Authorization": f"Bearer {key}"},
             timeout=timeout,
         )
+
+    def _chat_path(self) -> str:
+        # OpenAI clients are given either the host or a base that already ends in /v1.
+        if self.base.rstrip("/").endswith("/v1"):
+            return "chat/completions"
+        return "v1/chat/completions"
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -56,7 +72,7 @@ class MidiumCloud:
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
-        response = await self._client.post("v1/chat/completions", json=body)
+        response = await self._client.post(self._chat_path(), json=body)
         if response.status_code >= 400:
             raise CloudError(f"Midium Cloud {response.status_code}: {response.text[:500]}")
         payload = response.json()

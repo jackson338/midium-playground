@@ -15,11 +15,23 @@ TRACES_DIR = ROOT / "data" / "traces"
 COMMISSIONS_PATH = ROOT / "data" / "commissions" / "commissions.jsonl"
 SMOKE_COMMISSIONS_PATH = ROOT / "data" / "commissions" / "smoke.jsonl"
 SMOKE_REPORT_PATH = TRACES_DIR / "smoke_report.json"
+BENCHMARK_TASKS_PATH = ROOT / "benchmarks" / "tasks.json"
+BENCHMARKS_DIR = ROOT / "data" / "benchmarks"
+UCE_WORK_ROOT = Path(
+    "/Users/jacksonoaks/Documents/business/recursion_ai/courier/unified_compute_engine"
+)
 
-# Served names on Midium Cloud (cloud: tag stripped). Smoke runs all three.
+# Local student and the cloud grader. Display names, cloud: tag stripped.
+STUDENT_MODEL = "Gemma 4 E4B"
+GRADER_MODEL = "Gemma 4 26B A4B"
+
+# Same commissions for every smoke teacher.
+SMOKE_COMMISSIONS = 2
+
+# Served names on Midium Cloud (cloud: tag stripped). Smoke runs in this order.
 TEACHERS: tuple[str, ...] = (
-    "Laguna S 2.1",
     "Laguna XS 2.1",
+    "Laguna S 2.1",
     "Qwen3.8 27B",
 )
 
@@ -71,6 +83,8 @@ class Settings:
     openrouter_base_url: str
     midium_api_key: str
     midium_base_url: str
+    local_api_key: str
+    local_base_url: str
     brave_api_key: str
     github_token: str
 
@@ -81,6 +95,12 @@ class Settings:
     def require_midium(self) -> None:
         if not self.midium_api_key:
             raise SystemExit("Set MIDIUM_CLOUD_API_KEY in .env before running a teacher.")
+
+    def require_local(self) -> None:
+        if not self.local_api_key or not self.local_base_url:
+            raise SystemExit(
+                "Set MIDIUM_LOCAL_API_KEY and MIDIUM_LOCAL_BASE_URL in .env before the benchmark."
+            )
 
 
 def settings() -> Settings:
@@ -93,6 +113,10 @@ def settings() -> Settings:
         or "https://openrouter.ai/api/v1",
         midium_api_key=os.environ.get("MIDIUM_CLOUD_API_KEY", "").strip(),
         midium_base_url=base.rstrip("/") + "/",
+        local_api_key=os.environ.get("MIDIUM_LOCAL_API_KEY", "").strip(),
+        local_base_url=(os.environ.get("MIDIUM_LOCAL_BASE_URL", "").strip().rstrip("/") + "/")
+        if os.environ.get("MIDIUM_LOCAL_BASE_URL", "").strip()
+        else "",
         brave_api_key=os.environ.get("BRAVE_SEARCH_API_KEY", "").strip(),
         github_token=os.environ.get("GITHUB_TOKEN", "").strip(),
     )

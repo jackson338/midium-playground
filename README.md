@@ -25,7 +25,14 @@ Dry run, no keys. Writes two valid episodes to `data/traces/dry.jsonl`.
 uv run python -m playground dry-run
 ```
 
-Smoke. Same 10 commissions on Laguna S 2.1, Laguna XS 2.1, and Qwen3.8 27B. Writes `data/traces/smoke_report.json` and does not pick a winner.
+Smoke. Same 2 commissions on Laguna XS 2.1, then Laguna S 2.1, then Qwen3.8 27B. Writes `data/traces/smoke_report.json` and does not pick a winner.
+
+Benchmark. The same eight reader tasks on local Gemma 4 E4B, scored with deterministic checks and a good/bad grade from Midium Cloud's Gemma 4 26B A4B. Writes `data/benchmarks/e4b-baseline.json`.
+
+```bash
+uv run python -m playground benchmark
+uv run python -m playground benchmark compare e4b-baseline after-lora
+```
 
 ```bash
 uv run python -m playground smoke
