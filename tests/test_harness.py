@@ -4,7 +4,7 @@ from pathlib import Path
 from playground.config import MAX_CONTEXT_TOKENS
 from playground.harness.shell import CommandClass, Workspace, classify_os_bash
 from playground.harness.tools import ReaderTools
-from playground.repos import is_holdout
+from playground.repos import is_holdout, search_query
 from playground.score import score_episode
 from playground.traces import build_episode, estimate_tokens
 
@@ -50,6 +50,13 @@ def test_grep_finds_line(tmp_path: Path):
     found = ReaderTools(Workspace(tmp_path)).grep("def answer")
     assert found["count"] == 1
     assert found["matches"][0]["line"] == 1
+
+
+def test_search_query_is_one_license():
+    query = search_query("mit", "Python")
+    assert "license:mit" in query
+    assert " OR " not in query
+    assert "(" not in query
 
 
 def test_holdout_skips_product_trees():

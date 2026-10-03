@@ -16,9 +16,11 @@ import httpx
 from playground.config import HOLDOUT_REPO_NAMES, REPOS_DIR, Settings
 
 _LANGUAGES = ("Python", "TypeScript", "Go", "Rust", "Java", "Ruby")
+_LICENSES = ("mit", "apache-2.0", "bsd-3-clause", "bsd-2-clause")
 # GitHub size is kilobytes. This band is a real codebase that still clones fast.
+# Qualifiers are ANDed. GitHub search does not accept a parenthesized OR of
+# license: qualifiers — that query returns total_count 0.
 _SIZE = "size:400..12000"
-_LICENSE = "(license:mit OR license:apache-2.0 OR license:bsd-3-clause OR license:bsd-2-clause)"
 
 
 def is_holdout(full_name: str) -> bool:
@@ -37,63 +39,81 @@ def clone_dir(full_name: str) -> Path:
     return REPOS_DIR / full_name.replace("/", "__")
 
 
+def search_query(license_name: str, language: str) -> str:
+    return (
+        f"license:{license_name} fork:false archived:false {_SIZE} "
+        f"language:{language} stars:15..30000"
+    )
+
+
 async def discover(cfg: Settings, wanted: int) -> list[dict]:
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "midium-playground"}
     if cfg.github_token:
         headers["Authorization"] = f"Bearer {cfg.github_token}"
     found: dict[str, dict] = {}
+    # Spread the set across languages instead of filling it from the first page of Python.
+    per_language = max(1, (wanted + len(_LANGUAGES) - 1) // len(_LANGUAGES))
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         for language in _LANGUAGES:
             if len(found) >= wanted:
                 break
-            # Two pages per language. Six languages cover a few hundred repos
-            # without a long unauthenticated search loop.
-            for page in (1, 2):
-                if len(found) >= wanted:
+            before = len(found)
+            for license_name in _LICENSES:
+                if len(found) - before >= per_language or len(found) >= wanted:
                     break
-                query = (
-                    f"{_LICENSE} fork:false archived:false {_SIZE} "
-                    f"language:{language} stars:15..30000"
-                )
-                response = await client.get(
-                    "https://api.github.com/search/repositories",
-                    params={"q": query, "sort": "stars", "order": "desc", "per_page": 100, "page": page},
-                )
-                if response.status_code == 403 and not cfg.github_token:
-                    await asyncio.sleep(8)
-                    response = await client.get(
-                        "https://api.github.com/search/repositories",
-                        params={"q": query, "sort": "stars", "order": "desc", "per_page": 100, "page": page},
-                    )
-                if response.status_code == 403:
-                    raise SystemExit(
-                        "GitHub search was rate-limited. Set GITHUB_TOKEN in .env and retry."
-                    )
-                if response.status_code >= 400:
-                    break
-                items = response.json().get("items") or []
-                if not items:
-                    break
-                for item in items:
-                    full = item.get("full_name") or ""
-                    if not full or full in found or is_holdout(full):
-                        continue
-                    found[full] = {
-                        "full_name": full,
-                        "clone_url": item.get("clone_url"),
-                        "license": (item.get("license") or {}).get("spdx_id") or "NOASSERTION",
-                        "stars": item.get("stargazers_count") or 0,
-                        "description": item.get("description") or "",
-                        "language": item.get("language") or language,
-                    }
-                    if len(found) >= wanted:
+                for page in (1, 2):
+                    if len(found) - before >= per_language or len(found) >= wanted:
                         break
+                    query = search_query(license_name, language)
+                    items = await _search_page(client, query, page, has_token=bool(cfg.github_token))
+                    _take_items(found, items, language, license_name, wanted, per_language, before)
     if len(found) < wanted:
         raise SystemExit(
             f"GitHub search returned {len(found)} repos, wanted {wanted}. "
-            "Check network access or set GITHUB_TOKEN."
+            "The query ran, but not enough permissive repos came back."
         )
     return list(found.values())[:wanted]
+
+
+async def _search_page(client: httpx.AsyncClient, query: str, page: int, *, has_token: bool) -> list[dict]:
+    params = {"q": query, "sort": "stars", "order": "desc", "per_page": 100, "page": page}
+    response = await client.get("https://api.github.com/search/repositories", params=params)
+    if response.status_code == 403:
+        await asyncio.sleep(8)
+        response = await client.get("https://api.github.com/search/repositories", params=params)
+    if response.status_code == 403:
+        hint = "" if has_token else " Set GITHUB_TOKEN in .env and retry."
+        raise SystemExit(f"GitHub search was rate-limited.{hint}")
+    if response.status_code >= 400:
+        detail = response.text[:300].replace("\n", " ")
+        raise SystemExit(f"GitHub search failed ({response.status_code}) for {query!r}: {detail}")
+    payload = response.json()
+    return payload.get("items") or []
+
+
+def _take_items(
+    found: dict[str, dict],
+    items: list[dict],
+    language: str,
+    license_name: str,
+    wanted: int,
+    per_language: int,
+    before: int,
+) -> None:
+    for item in items:
+        if len(found) >= wanted or len(found) - before >= per_language:
+            return
+        full = item.get("full_name") or ""
+        if not full or full in found or is_holdout(full):
+            continue
+        found[full] = {
+            "full_name": full,
+            "clone_url": item.get("clone_url"),
+            "license": (item.get("license") or {}).get("spdx_id") or license_name,
+            "stars": item.get("stargazers_count") or 0,
+            "description": item.get("description") or "",
+            "language": item.get("language") or language,
+        }
 
 
 async def clone_all(repos: list[dict], concurrency: int = 8) -> list[dict]:
