@@ -264,6 +264,19 @@ def unsloth_one_step(text: str, max_seq_length: int) -> None:
 _ceiling_announced = False
 
 
+def _mlx_set(mx, name: str, value: int):
+    fn = getattr(mx, name, None)
+    if fn is None:
+        fn = getattr(getattr(mx, "metal", None), name, None)
+    if fn is None:
+        return None
+    try:
+        return fn(value)
+    except TypeError:
+        fn(value)
+        return None
+
+
 def enforce_metal_ceiling() -> None:
     """Hard-cap MLX wired memory. A SIGTERM cannot stop an in-flight Metal allocation.
 
@@ -277,17 +290,16 @@ def enforce_metal_ceiling() -> None:
         return
     limit = MEMORY_CEILING_BYTES
     cache = min(limit, METAL_CACHE_LIMIT_BYTES)
-    for name, value in (
-        ("set_wired_limit", limit),
-        ("set_memory_limit", limit),
-        ("set_cache_limit", cache),
-    ):
-        fn = getattr(mx, name, None)
-        if fn is None:
-            fn = getattr(getattr(mx, "metal", None), name, None)
-        if fn is not None:
-            fn(value)
-    if not _ceiling_announced:
+    previous_wired = _mlx_set(mx, "set_wired_limit", limit)
+    _mlx_set(mx, "set_memory_limit", limit)
+    _mlx_set(mx, "set_cache_limit", cache)
+    if isinstance(previous_wired, int) and previous_wired > limit:
+        print(
+            f"MLX wired limit was {previous_wired / 1024 ** 3:.2f}GB, reset to {limit / 1024 ** 3:.0f}GB.",
+            flush=True,
+        )
+        _ceiling_announced = True
+    elif not _ceiling_announced:
         _ceiling_announced = True
         print(
             f"MLX wired limit set to {limit / 1024 ** 3:.0f}GB "
