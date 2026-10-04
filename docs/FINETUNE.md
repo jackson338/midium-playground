@@ -1,6 +1,6 @@
 # Fine-tune plan
 
-Do not start the full train. The first three runs are memory probes only. The machine is the M3 Ultra Mac Studio, 512GB. The hard ceiling is 200GB of process physical footprint. The MacBook only generates data.
+Do not start the full train. The first three runs are memory probes only. The machine is the M3 Ultra Mac Studio, 512GB. The hard ceiling is 400GB of process physical footprint. The MacBook only generates data.
 
 ## What gets published
 
@@ -10,7 +10,7 @@ Base model is Gemma 4 E4B, text only. Freeze vision and audio. Train with Unslot
 
 ## Three probes, in order
 
-Each probe is one step, batch size 1, one fixed example. Print unified memory before the step, at peak during the step, and after it. Write that to `data/probes/<name>.json` with context length, tokens in the example, peak memory, and whether it finished or was killed. Stop the run after the one step. A watcher aborts the process if its physical footprint crosses 200GB. Do not start the next probe if the previous one was killed or its peak crossed 200GB.
+Each probe is one step, batch size 1, one fixed example. Print unified memory before the step, at peak during the step, and after it. Write that to `data/probes/<name>.json` with context length, tokens in the example, peak memory, and whether it finished or was killed. Stop the run after the one step. A watcher aborts the process if its physical footprint crosses 400GB. Do not start the next probe if the previous one was killed or its peak crossed 400GB.
 
 1. `probe-16k`. One trace trimmed or packed to under 16k tokens.
 2. `probe-32k`. Same, under 32k.
@@ -26,6 +26,6 @@ uv run python -m playground probe --context 98304
 
 ## After the map
 
-Pick the largest batch that keeps peak memory under 200GB at 96k. Then run the full LoRA on the committed traces. Eval is SubSWE, same 40 tasks, cap 16, both runs. The baseline is the Gemma 4 E4B SubSWE score once that run finishes. The trained model has to beat that score, then Laguna XS 2.1 (36/40 on run 1). Export a 4-bit checkpoint only after the bf16 LoRA beats the baseline. QAT is a second train, not a quantize of the probe.
+Pick the largest batch that keeps peak memory under 400GB at 96k. Then run the full LoRA on the committed traces. Eval is SubSWE, same 40 tasks, cap 16, both runs. The baseline is the Gemma 4 E4B SubSWE score once that run finishes. The trained model has to beat that score, then Laguna XS 2.1 (36/40 on run 1). Export a 4-bit checkpoint only after the bf16 LoRA beats the baseline. QAT is a second train, not a quantize of the probe.
 
 Do not change the reader prompt, do not regenerate the 5k, and do not launch the full train from the probe script.

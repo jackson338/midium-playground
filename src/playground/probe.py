@@ -2,7 +2,7 @@
 
 The probe does not start a full train. It packs one teacher trace, takes one
 bf16 LoRA step through Unsloth, and records unified memory. The next context
-is refused when the previous probe was killed or crossed 200GB.
+is refused when the previous probe was killed or crossed 400GB.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Callable
 from playground.config import ROOT, TRACES_DIR
 from playground.traces import read_jsonl
 
-MEMORY_CEILING_BYTES = 200 * 1024 ** 3
+MEMORY_CEILING_BYTES = 400 * 1024 ** 3
 PROBE_CONTEXTS = (16384, 32768, 98304)
 PROBE_NAMES = {16384: "probe-16k", 32768: "probe-32k", 98304: "probe-96k"}
 TEACHER_TRACE_PARTS = (
