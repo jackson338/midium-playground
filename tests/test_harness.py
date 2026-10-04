@@ -37,6 +37,24 @@ def test_read_file_rejects_paths_outside_workspace(tmp_path: Path):
     assert result["error"] == "outside_work_root"
 
 
+def test_glob_finds_a_python_file(tmp_path: Path):
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    found = ReaderTools(Workspace(tmp_path)).glob("**/*.py")
+    assert "error" not in found
+    assert any(item["path"] == "a.py" for item in found["matches"])
+
+
+def test_glob_returns_an_error_when_pathlib_rejects_the_pattern(tmp_path: Path, monkeypatch):
+    class _Reject:
+        def __iter__(self):
+            raise ValueError("Invalid pattern: '**' can only be an entire path component")
+
+    monkeypatch.setattr(Path, "glob", lambda self, pattern: _Reject())
+    result = ReaderTools(Workspace(tmp_path)).dispatch("glob", {"pattern": "**.py"})
+    assert result["error"] == "invalid_pattern"
+    assert "entire path component" in result["detail"]
+
+
 def test_bash_write_is_refused(tmp_path: Path):
     assert classify_os_bash("git commit -m x") == CommandClass.WRITE
     assert classify_os_bash("git status") == CommandClass.READ

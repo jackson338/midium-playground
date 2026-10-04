@@ -95,7 +95,7 @@ class ReaderTools:
             }
         try:
             return fn(**_filter_args(fn, arguments or {}))
-        except TypeError as exc:
+        except (TypeError, ValueError) as exc:
             return {"error": "bad_arguments", "detail": str(exc)}
 
     def get_cwd(self) -> dict:
@@ -265,27 +265,31 @@ class ReaderTools:
             iterator = root.glob(cleaned)
         except (ValueError, OSError) as exc:
             return {"error": "invalid_pattern", "pattern": cleaned, "detail": str(exc)}
-        for candidate in iterator:
-            rel = _rel(root, candidate)
-            parts = Path(rel).parts
-            if any(part in DISCOVERY_SKIP_DIRS or part.startswith(".") for part in parts):
-                continue
-            if len(matches) >= GLOB_MAX_RESULTS:
-                truncated = True
-                break
-            kind = "directory" if candidate.is_dir() else "file"
-            try:
-                size = candidate.stat().st_size if kind == "file" else None
-            except OSError:
-                continue
-            matches.append(
-                {
-                    "path": rel,
-                    "absolute_path": str(candidate),
-                    "kind": kind,
-                    "size": size,
-                }
-            )
+        try:
+            for candidate in iterator:
+                rel = _rel(root, candidate)
+                parts = Path(rel).parts
+                if any(part in DISCOVERY_SKIP_DIRS or part.startswith(".") for part in parts):
+                    continue
+                if len(matches) >= GLOB_MAX_RESULTS:
+                    truncated = True
+                    break
+                kind = "directory" if candidate.is_dir() else "file"
+                try:
+                    size = candidate.stat().st_size if kind == "file" else None
+                except OSError:
+                    continue
+                matches.append(
+                    {
+                        "path": rel,
+                        "absolute_path": str(candidate),
+                        "kind": kind,
+                        "size": size,
+                    }
+                )
+        except ValueError as exc:
+            # pathlib validates '**' when iteration starts, not when glob() is called.
+            return {"error": "invalid_pattern", "pattern": cleaned, "detail": str(exc)}
         matches.sort(key=lambda item: item["path"])
         hint = None
         if truncated:
