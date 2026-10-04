@@ -1,6 +1,7 @@
-"""One-epoch Gemma 4 E4B LoRA at a 32k token cap.
+"""One-epoch Gemma 4 E4B tool-call LoRA at a 32k token cap.
 
-This is not the probe. Batch size 1 at 32k is about 160GB.
+Examples are rendered with Gemma's chat template, not the plain JSON transcript.
+The adapter is data/checkpoints/e4b-32k-tools. Batch size 1 stays near 160GB.
 Batch size 2 is about 290GB, so it is refused under the 200GB ceiling.
 """
 
@@ -12,6 +13,8 @@ import threading
 from pathlib import Path
 
 from playground.config import ROOT
+from playground.gemma_turns import TOOL_TRAIN_EXAMPLES, build_checked_tool_train_set
+from playground.harness.tools import openai_tools
 from playground.probe import (
     MEMORY_CEILING_BYTES,
     MODEL_NAME,
@@ -26,6 +29,7 @@ from playground.probe import (
 TRAIN_CONTEXT = 32768
 MAX_BATCH_SIZE = 1
 CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-lora"
+TOOLS_CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-tools"
 
 
 def validate_train_args(context: int, batch_size: int) -> None:
@@ -58,21 +62,67 @@ def build_train_set(rows: list[dict], limit: int, count_tokens: CountTokens) -> 
     return packed, skipped
 
 
-def run_train_cli(context: int, batch_size: int) -> None:
-    validate_train_args(context, batch_size)
-    from playground.probe import _load_tokenizer, _require_unsloth
+def resolve_tools_checkpoint(checkpoint: Path | None) -> Path:
+    """The new adapter is e4b-32k-tools. Never overwrite e4b-32k-lora."""
+    dest = checkpoint or TOOLS_CHECKPOINT_DIR
+    if dest.resolve() == CHECKPOINT_DIR.resolve():
+        raise SystemExit(
+            "Refusing to write over data/checkpoints/e4b-32k-lora. "
+            "The tool-call adapter goes to data/checkpoints/e4b-32k-tools."
+        )
+    return dest
 
+
+def chat_template_renderer(tokenizer):
+    """Render with Gemma's template. The loss string must contain its tool-call tokens."""
+    tools = openai_tools()
+
+    def render(messages: list[dict]) -> str:
+        text = tokenizer.apply_chat_template(
+            messages,
+            tools=tools,
+            add_generation_prompt=False,
+            tokenize=False,
+        )
+        if not isinstance(text, str):
+            raise SystemExit("apply_chat_template did not return text.")
+        if any(message.get("tool_calls") for message in messages) and "<|tool_call>call:" not in text:
+            raise SystemExit(
+                "Stopping. apply_chat_template did not emit <|tool_call>call:. "
+                "Refusing to train a plain-text adapter."
+            )
+        return text
+
+    def count(text: str) -> int:
+        return len(tokenizer.encode(text, add_special_tokens=False))
+
+    return render, count
+
+
+def run_train_cli(
+    context: int,
+    batch_size: int,
+    *,
+    examples: int = TOOL_TRAIN_EXAMPLES,
+    checkpoint: Path | None = None,
+) -> None:
+    """Train the tool-call LoRA. This does not resume data/checkpoints/e4b-32k-lora."""
+    validate_train_args(context, batch_size)
+    from playground.probe import _require_unsloth
+
+    dest = resolve_tools_checkpoint(checkpoint)
     rows = load_teacher_rows()
-    count_tokens = _load_tokenizer()
-    examples, skipped = build_train_set(rows, context, count_tokens)
-    tokens = sum(item["tokens"] for item in examples)
+    tokenizer = _load_chat_tokenizer()
+    render, count_tokens = chat_template_renderer(tokenizer)
+    packed, skipped = build_checked_tool_train_set(rows, context, count_tokens, render, n=examples)
+    tokens = sum(item["tokens"] for item in packed)
     print(
-        f"Train set: {len(examples)} episodes, {tokens} tokens, skipped {skipped}, "
+        f"Tool-call train set: {len(packed)} episodes, {tokens} tokens, skipped {skipped}, "
         f"batch_size={batch_size}",
         flush=True,
     )
     _require_unsloth()
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
     stop = threading.Event()
     peak = {"bytes": phys_footprint()}
     outcome = {"status": "finished"}
@@ -84,27 +134,41 @@ def run_train_cli(context: int, batch_size: int) -> None:
             peak["bytes"] = max(peak["bytes"], used)
             if used >= MEMORY_CEILING_BYTES:
                 outcome["status"] = "killed"
-                _write_status("killed", examples=len(examples), tokens=tokens, peak_bytes=used)
+                _write_status(
+                    "killed", examples=len(packed), tokens=tokens, peak_bytes=used, dest=dest
+                )
                 os.kill(os.getpid(), signal.SIGTERM)
 
     watcher = threading.Thread(target=watch, daemon=True)
     watcher.start()
     try:
-        _unsloth_train([item["text"] for item in examples], context, batch_size)
+        _unsloth_train([item["text"] for item in packed], context, batch_size, dest)
     finally:
         stop.set()
         after = phys_footprint()
         peak["bytes"] = max(peak["bytes"], after)
         if outcome["status"] != "killed":
-            _write_status("finished", examples=len(examples), tokens=tokens, peak_bytes=peak["bytes"])
+            _write_status(
+                "finished", examples=len(packed), tokens=tokens, peak_bytes=peak["bytes"], dest=dest
+            )
         print(
-            f"Saved {CHECKPOINT_DIR} status={outcome['status']} "
+            f"Saved {dest} status={outcome['status']} "
             f"peak_bytes={peak['bytes']} pressure={memory_pressure()}",
             flush=True,
         )
 
 
-def _unsloth_train(texts: list[str], max_seq_length: int, batch_size: int) -> None:
+def _load_chat_tokenizer():
+    try:
+        from transformers import AutoTokenizer
+    except ImportError as exc:
+        raise SystemExit(
+            "The train tokenizer is not installed. On the Studio run: uv sync --group studio"
+        ) from exc
+    return AutoTokenizer.from_pretrained(MODEL_NAME)
+
+
+def _unsloth_train(texts: list[str], max_seq_length: int, batch_size: int, dest: Path) -> None:
     from unsloth import FastModel
     from transformers import TrainingArguments
 
@@ -132,7 +196,7 @@ def _unsloth_train(texts: list[str], max_seq_length: int, batch_size: int) -> No
     from trl import SFTTrainer
 
     args = TrainingArguments(
-        output_dir=str(CHECKPOINT_DIR),
+        output_dir=str(dest),
         per_device_train_batch_size=batch_size,
         num_train_epochs=1,
         learning_rate=2e-4,
@@ -172,13 +236,15 @@ def _unsloth_train(texts: list[str], max_seq_length: int, batch_size: int) -> No
         trainer.add_callback(_Ceiling())
     enforce_metal_ceiling()
     trainer.train()
-    trainer.save_model(str(CHECKPOINT_DIR))
+    trainer.save_model(str(dest))
 
 
-def _write_status(status: str, *, examples: int, tokens: int, peak_bytes: int) -> None:
+def _write_status(
+    status: str, *, examples: int, tokens: int, peak_bytes: int, dest: Path = TOOLS_CHECKPOINT_DIR
+) -> None:
     import json
 
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
     payload = {
         "status": status,
         "context": TRAIN_CONTEXT,
@@ -187,4 +253,4 @@ def _write_status(status: str, *, examples: int, tokens: int, peak_bytes: int) -
         "peak_bytes": peak_bytes,
         "ceiling_bytes": MEMORY_CEILING_BYTES,
     }
-    (CHECKPOINT_DIR / "train-status.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    (dest / "train-status.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

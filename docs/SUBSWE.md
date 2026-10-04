@@ -53,12 +53,12 @@ Repeat with `--run 2`. Traces go to `data/benchmarks/subswe/<model>.run<N>.jsonl
 
 ## Fine-tuned model on the Studio
 
-The adapter is `data/checkpoints/e4b-32k-lora` from the 32k train. It is not in git. The eight task repos are not in the clone either. Fetch them, then run the same reader loop with the adapter loaded. Grading stays off, so no Midium key is required.
+The comparison is F16 Gemma 4 E4B with no adapter, then a 100-example tool-call LoRA at `data/checkpoints/e4b-32k-tools`. The old `e4b-32k-lora` adapter is not this run. The eight task repos are not in the clone. Grading stays off, so no Midium key is required.
 
 ```bash
-uv run python -m playground subswe --fetch-repos
-uv run python -m playground subswe --model "Gemma 4 E4B LoRA" --run 1
-uv run python -m playground subswe --score "Gemma 4 E4B LoRA"
+uv run python -m playground compare-lora
 ```
 
-`--score` prints that file's pass rate only. It does not require the other models' traces.
+That fetches the pinned repos when they are missing, writes `gemma-4-e4b-f16.run1.jsonl`, trains, deletes `gemma-4-e4b-lora.run1.jsonl` so the old 1/40 file cannot be resumed, then writes a new LoRA trace. It prints both pass rates, per-kind rates, call counts, and the checks that failed.
+
+`--score` still prints one file's pass rate. It does not require the other models' traces.

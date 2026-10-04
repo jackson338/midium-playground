@@ -32,9 +32,9 @@ Train one epoch at a 32,768-token cap, batch size 1. About 62 of the 877 train e
 
 ```bash
 git pull
-uv run python -m playground train --context 32768 --batch-size 1
+uv run python -m playground compare-lora
 ```
 
-The adapter is written to `data/checkpoints/e4b-32k-lora`. A second epoch would roughly double the time. SubSWE eval of that adapter is a later step. The baseline is the Gemma 4 E4B SubSWE score. The trained model has to beat that score, then Laguna XS 2.1 (36/40 on run 1). Export a 4-bit checkpoint only after the bf16 LoRA beats the baseline. QAT is a second train, not a quantize of this run.
+That command scores F16 Gemma 4 E4B with no adapter, trains 100 tool-call examples, then scores the new adapter. Before those 100 rows are trained, one example is rendered. The run stops unless that string contains `<|tool_call>call:` and does not contain `{"name"`. The adapter is written to `data/checkpoints/e4b-32k-tools`. It does not resume or overwrite `data/checkpoints/e4b-32k-lora`. The printed comparison is the new F16 trace and the new adapter. The earlier Midium Gemma score stays out of it. Both pass rates are printed. There is no average and no judge. Batch size stays 1 under the 200GB wired limit. About 1 to 2 hours for the train, plus the two 40-task runs. Export a 4-bit checkpoint only after this adapter beats the F16 score from the same command. QAT is a second train, not a quantize of this run.
 
 Do not change the reader prompt, do not regenerate the 5k, and do not launch the full train from the probe script.

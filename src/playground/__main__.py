@@ -10,6 +10,7 @@
     uv run python -m playground dry-run
     uv run python -m playground probe --context 16384
     uv run python -m playground train --context 32768 --batch-size 1
+    uv run python -m playground compare-lora
 """
 
 from __future__ import annotations
@@ -76,9 +77,15 @@ def main() -> None:
     probe = sub.add_parser("probe", help="One-step Gemma 4 E4B LoRA memory probe. Studio only.")
     probe.add_argument("--context", type=int, required=True, choices=(16384, 32768, 98304))
 
-    train = sub.add_parser("train", help="One-epoch Gemma 4 E4B LoRA at a 32k token cap.")
+    train = sub.add_parser("train", help="100-example Gemma tool-call LoRA at a 32k token cap.")
     train.add_argument("--context", type=int, default=32768)
     train.add_argument("--batch-size", type=int, default=1)
+    train.add_argument("--examples", type=int, default=100)
+
+    sub.add_parser(
+        "compare-lora",
+        help="Score F16 Gemma, train 100 tool-call examples, score that adapter.",
+    )
 
     args = parser.parse_args()
     if args.cmd == "commissions":
@@ -116,7 +123,12 @@ def main() -> None:
     if args.cmd == "train":
         from playground.train import run_train_cli
 
-        run_train_cli(args.context, args.batch_size)
+        run_train_cli(args.context, args.batch_size, examples=args.examples)
+        return
+    if args.cmd == "compare-lora":
+        from playground.compare_lora import run_compare_lora
+
+        run_compare_lora()
         return
 
 
@@ -124,7 +136,7 @@ def _subswe(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from playground.config import ROOT
-    from playground.subswe import LORA_MODEL, fetch_subswe_repos, run_subswe, score_model, write_report
+    from playground.subswe import F16_MODEL, LORA_MODEL, fetch_subswe_repos, run_subswe, score_model, write_report
 
     if args.fetch_repos:
         fetch_subswe_repos()
@@ -137,7 +149,7 @@ def _subswe(args: argparse.Namespace) -> None:
         return
     if not args.model:
         raise SystemExit("Pass --model, --score, --fetch-repos, or --report.")
-    grade = not args.no_grade and args.model != LORA_MODEL
+    grade = not args.no_grade and args.model not in {LORA_MODEL, F16_MODEL}
     adapter = Path(args.adapter) if args.adapter else None
     if adapter is not None and not adapter.is_absolute():
         adapter = ROOT / adapter

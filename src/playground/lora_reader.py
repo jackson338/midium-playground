@@ -1,8 +1,8 @@
-"""Turn the fine-tuned Gemma 4 E4B LoRA into the reader loop's completer.
+"""Turn Gemma 4 E4B, with or without the tool-call LoRA, into the reader completer.
 
-The harness is still run_reader: the research skill and the read-only tools.
-The model was trained to write an assistant turn as {"name","arguments"}.
-That object becomes a tool call. Any other text is the report.
+The harness is still run_reader. One generation is one assistant turn. A Gemma
+tool-call span becomes one tool call. Text after that span, including a tool
+result the model wrote itself, is ignored. Text with no tool call is the report.
 """
 
 from __future__ import annotations
@@ -11,10 +11,11 @@ import asyncio
 import json
 from pathlib import Path
 
+from playground.gemma_turns import completion_only, next_turn, prepare_for_template
 from playground.harness.loop import split_thinking
 from playground.probe import MODEL_NAME, enforce_metal_ceiling
 
-ADAPTER_DIR = Path("data/checkpoints/e4b-32k-lora")
+ADAPTER_DIR = Path("data/checkpoints/e4b-32k-tools")
 
 
 def transcript_from_loop_messages(messages: list[dict]) -> str:
@@ -84,36 +85,55 @@ def _tool_payload(visible: str) -> dict | None:
 
 
 class LoraReader:
-    def __init__(self, adapter: Path):
-        if not adapter.is_dir():
+    def __init__(self, adapter: Path | None):
+        if adapter is not None and not adapter.is_dir():
             raise SystemExit(f"LoRA adapter not found: {adapter}")
         self.adapter = adapter
         self._model = None
         self._processor = None
+        self._stopped = False
 
     async def aclose(self) -> None:
         self._model = None
         self._processor = None
 
     async def complete(self, messages: list[dict], tools: list[dict] | None) -> dict:
-        del tools
-        return await asyncio.to_thread(self._complete_sync, messages)
+        return await asyncio.to_thread(self._complete_sync, messages, tools)
 
-    def _complete_sync(self, messages: list[dict]) -> dict:
+    def _complete_sync(self, messages: list[dict], tools: list[dict] | None) -> dict:
+        if self._stopped:
+            message, self._stopped = next_turn("", True)
+            return message
         if self._model is None:
             self._model, self._processor = load_lora(self.adapter)
-        prompt = transcript_from_loop_messages(messages)
+        prompt = render_prompt(self._processor, messages, tools)
         raw = generate_continuation(self._model, self._processor, prompt)
-        return assistant_message_from_text(raw)
+        message, self._stopped = next_turn(completion_only(prompt, raw), False)
+        return message
 
 
-def load_lora(adapter: Path):
+def render_prompt(processor, messages: list[dict], tools: list[dict] | None) -> str:
+    tokenizer = getattr(processor, "tokenizer", None) or processor
+    apply = getattr(tokenizer, "apply_chat_template", None)
+    if apply is None:
+        raise SystemExit("Gemma tokenizer has no apply_chat_template.")
+    kwargs = {"add_generation_prompt": True, "tokenize": False}
+    if tools:
+        kwargs["tools"] = tools
+    text = apply(prepare_for_template(messages), **kwargs)
+    if not isinstance(text, str):
+        raise SystemExit("apply_chat_template did not return text.")
+    return text
+
+
+def load_lora(adapter: Path | None):
     from playground.probe import _require_unsloth
 
     _require_unsloth()
     from mlx_vlm import load
 
-    model, processor = load(MODEL_NAME, adapter_path=str(adapter))
+    kwargs = {"adapter_path": str(adapter)} if adapter is not None else {}
+    model, processor = load(MODEL_NAME, **kwargs)
     enforce_metal_ceiling()
     return model, processor
 

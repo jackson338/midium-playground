@@ -35,6 +35,7 @@ PUBLISHED_MODELS: tuple[tuple[str, str, int], ...] = (
     ("Laguna XS 2.1", "cloud", 2),
 )
 LORA_MODEL = "Gemma 4 E4B LoRA"
+F16_MODEL = "Gemma 4 E4B F16"
 
 
 def load_subswe_tasks() -> list[dict]:
@@ -49,12 +50,12 @@ def trace_path(model: str, run: int) -> Path:
 
 
 def model_spec(model: str) -> tuple[str, int]:
-    if model == LORA_MODEL:
+    if model in {LORA_MODEL, F16_MODEL}:
         return "lora", 1
     for name, route, concurrency in PUBLISHED_MODELS:
         if name == model:
             return route, concurrency
-    known = ", ".join(name for name, _, _ in PUBLISHED_MODELS)
+    known = ", ".join([*(name for name, _, _ in PUBLISHED_MODELS), F16_MODEL, LORA_MODEL])
     raise SystemExit(f"Unknown SubSWE model {model!r}. Choose one of: {known}")
 
 
@@ -331,9 +332,11 @@ async def _grade(grader: MidiumCloud, task: dict, report: str) -> dict:
 def _student(cfg: Settings, model: str, route: str, adapter: Path | None = None):
     if route == "lora":
         from playground.lora_reader import LoraReader
-        from playground.train import CHECKPOINT_DIR
+        from playground.train import TOOLS_CHECKPOINT_DIR
 
-        return LoraReader(adapter or CHECKPOINT_DIR)
+        if model == F16_MODEL:
+            return LoraReader(None)
+        return LoraReader(adapter or TOOLS_CHECKPOINT_DIR)
     if route == "local":
         cfg.require_local()
         return MidiumCloud(cfg, model, api_key=cfg.local_api_key, base_url=cfg.local_base_url)
