@@ -2,7 +2,7 @@
 
 The probe does not start a full train. It packs one teacher trace, takes one
 bf16 LoRA step through Unsloth, and records unified memory. The next context
-is refused when the previous probe was killed or crossed 400GB.
+is refused when the previous probe was killed or crossed 200GB.
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ from typing import Callable
 from playground.config import ROOT, TRACES_DIR
 from playground.traces import read_jsonl
 
-MEMORY_CEILING_BYTES = 400 * 1024 ** 3
+MEMORY_CEILING_BYTES = 200 * 1024 ** 3
+# MLX cache on top of a 32k step (~155GB) must still fit under the ceiling.
+METAL_CACHE_LIMIT_BYTES = 16 * 1024 ** 3
 PROBE_CONTEXTS = (16384, 32768, 98304)
 PROBE_NAMES = {16384: "probe-16k", 32768: "probe-32k", 98304: "probe-96k"}
 TEACHER_TRACE_PARTS = (
@@ -165,6 +167,7 @@ def run_probe_cli(context: int) -> None:
 
     def watch() -> None:
         while not stop.wait(0.5):
+            enforce_metal_ceiling()
             used = phys_footprint()
             peak["bytes"] = max(peak["bytes"], used)
             peak["pressure"] = memory_pressure()
@@ -254,7 +257,26 @@ def unsloth_one_step(text: str, max_seq_length: int) -> None:
             report_to="none",
         ),
     )
+    enforce_metal_ceiling()
     trainer.train()
+
+
+def enforce_metal_ceiling() -> None:
+    """Hard-cap MLX wired memory. A SIGTERM cannot stop an in-flight Metal allocation."""
+    try:
+        import mlx.core as mx
+    except ImportError:
+        return
+    metal = mx.metal
+    limit = MEMORY_CEILING_BYTES
+    if hasattr(metal, "set_wired_limit"):
+        metal.set_wired_limit(limit)
+    elif hasattr(mx, "set_wired_limit"):
+        mx.set_wired_limit(limit)
+    if hasattr(metal, "set_memory_limit"):
+        metal.set_memory_limit(limit)
+    if hasattr(metal, "set_cache_limit"):
+        metal.set_cache_limit(min(limit, METAL_CACHE_LIMIT_BYTES))
 
 
 def phys_footprint() -> int:

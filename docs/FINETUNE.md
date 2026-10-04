@@ -1,6 +1,6 @@
 # Fine-tune plan
 
-Do not start the full train. The first three runs are memory probes only. The machine is the M3 Ultra Mac Studio, 512GB. The hard ceiling is 400GB of process physical footprint. The MacBook only generates data.
+Do not start the full train. The first three runs are memory probes only. The machine is the M3 Ultra Mac Studio, 512GB. The hard ceiling is 200GB. MLX's wired limit is set to 200GB so an allocation past that fails. A side-thread SIGTERM is only a backstop, because it cannot interrupt an in-flight Metal kernel. The MacBook only generates data.
 
 ## What gets published
 
@@ -10,7 +10,7 @@ Base model is Gemma 4 E4B, text only. Freeze vision and audio. Train with Unslot
 
 ## Three probes, in order
 
-Each probe is one step, batch size 1, one fixed example. Print unified memory before the step, at peak during the step, and after it. Write that to `data/probes/<name>.json` with context length, tokens in the example, peak memory, and whether it finished or was killed. Stop the run after the one step. A watcher aborts the process if its physical footprint crosses 400GB. Do not start the next probe if the previous one was killed or its peak crossed 400GB.
+Each probe is one step, batch size 1, one fixed example. Print unified memory before the step, at peak during the step, and after it. Write that to `data/probes/<name>.json` with context length, tokens in the example, peak memory, and whether it finished or was killed. Stop the run after the one step. MLX's wired limit is 200GB. Do not start the next probe if the previous one was killed or its peak crossed 200GB.
 
 1. `probe-16k`. One trace trimmed or packed to under 16k tokens.
 2. `probe-32k`. Same, under 32k.
@@ -26,13 +26,9 @@ uv run python -m playground probe --context 98304
 
 ## After the map
 
-The 32k probe is the train setting. One step at 30,449 tokens used 127GB of Metal memory and 155GB of process footprint, in 70.5 seconds (432 tokens per second). The 55,741-token step used 289GB of Metal memory and 335GB of footprint. A full 96k sequence does not fit under 400GB.
+The 32k probe is the train setting. One step at 30,449 tokens used 127GB of Metal memory and 155GB of process footprint, in 70.5 seconds (432 tokens per second). The 55,741-token step used 289GB of Metal memory and 335GB of footprint. That does not fit under 200GB. A full 96k sequence does not either.
 
-Train one epoch at a 32,768-token cap. About 62 of the 877 train episodes are over 32k; capping them leaves about 16.3 million tokens. Holdout rows are not trained.
-
-- Batch size 1: about 160GB and 10 to 14 hours. This is the first run.
-- Batch size 2: about 290GB and 12 to 20 hours. This is the largest batch under 400GB. It does not reliably finish sooner.
-- Batch size 3: about 430GB. Refused.
+Train one epoch at a 32,768-token cap, batch size 1. About 62 of the 877 train episodes are over 32k; capping them leaves about 16.3 million tokens. Holdout rows are not trained. Expect about 160GB and 10 to 14 hours. Batch size 2 is about 290GB and is refused. MLX's wired limit is 200GB, which is what stops the allocator cache from growing the way the first train did.
 
 ```bash
 git pull

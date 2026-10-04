@@ -1,7 +1,7 @@
 """One-epoch Gemma 4 E4B LoRA at a 32k token cap.
 
-This is not the probe. Batch size 1 is the measured setting, about 160GB.
-Batch size 2 is the largest that stays under the 400GB footprint ceiling.
+This is not the probe. Batch size 1 at 32k is about 160GB.
+Batch size 2 is about 290GB, so it is refused under the 200GB ceiling.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from playground.probe import (
     MEMORY_CEILING_BYTES,
     MODEL_NAME,
     CountTokens,
+    enforce_metal_ceiling,
     load_teacher_rows,
     memory_pressure,
     pack_example,
@@ -23,7 +24,7 @@ from playground.probe import (
 )
 
 TRAIN_CONTEXT = 32768
-MAX_BATCH_SIZE = 2
+MAX_BATCH_SIZE = 1
 CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-lora"
 
 
@@ -32,9 +33,10 @@ def validate_train_args(context: int, batch_size: int) -> None:
         raise SystemExit(
             f"This train is capped at {TRAIN_CONTEXT} tokens. Refusing context {context}."
         )
-    if batch_size not in (1, 2):
+    if batch_size != MAX_BATCH_SIZE:
         raise SystemExit(
-            f"Batch size {batch_size} is not allowed. Use 1, or 2 to fill the 400GB budget."
+            f"Batch size {batch_size} is not allowed. Batch size 1 stays near 160GB. "
+            "Batch size 2 is about 290GB and would cross the 200GB ceiling."
         )
 
 
@@ -77,6 +79,7 @@ def run_train_cli(context: int, batch_size: int) -> None:
 
     def watch() -> None:
         while not stop.wait(0.5):
+            enforce_metal_ceiling()
             used = phys_footprint()
             peak["bytes"] = max(peak["bytes"], used)
             if used >= MEMORY_CEILING_BYTES:
@@ -153,6 +156,21 @@ def _unsloth_train(texts: list[str], max_seq_length: int, batch_size: int) -> No
             train_dataset=dataset,
             args=args,
         )
+    enforce_metal_ceiling()
+    try:
+        from transformers import TrainerCallback
+    except ImportError:
+        TrainerCallback = None  # type: ignore[misc, assignment]
+    if TrainerCallback is not None:
+        class _Ceiling(TrainerCallback):
+            def on_train_begin(self, args, state, control, **kwargs):
+                enforce_metal_ceiling()
+
+            def on_step_begin(self, args, state, control, **kwargs):
+                enforce_metal_ceiling()
+
+        trainer.add_callback(_Ceiling())
+    enforce_metal_ceiling()
     trainer.train()
     trainer.save_model(str(CHECKPOINT_DIR))
 

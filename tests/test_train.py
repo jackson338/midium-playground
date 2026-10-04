@@ -48,9 +48,15 @@ def test_overlong_skeleton_is_skipped():
     assert "KEEP" in packed[0]["text"]
 
 
-def test_batch_size_above_two_is_rejected():
+def test_batch_size_above_one_is_rejected():
     with pytest.raises(SystemExit):
-        validate_train_args(TRAIN_CONTEXT, 3)
+        validate_train_args(TRAIN_CONTEXT, 2)
+
+
+def test_ceiling_is_200gb():
+    from playground.probe import MEMORY_CEILING_BYTES
+
+    assert MEMORY_CEILING_BYTES == 200 * 1024 ** 3
 
 
 def test_context_above_32k_is_rejected():
