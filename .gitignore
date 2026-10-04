@@ -14,3 +14,4 @@ data/traces/smoke/
 data/traces/dry.jsonl
 data/traces/smoke_report.json
 data/probes/
+data/checkpoints/

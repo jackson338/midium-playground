@@ -9,6 +9,7 @@
     uv run python -m playground benchmark compare e4b-baseline after-lora
     uv run python -m playground dry-run
     uv run python -m playground probe --context 16384
+    uv run python -m playground train --context 32768 --batch-size 1
 """
 
 from __future__ import annotations
@@ -72,6 +73,10 @@ def main() -> None:
     probe = sub.add_parser("probe", help="One-step Gemma 4 E4B LoRA memory probe. Studio only.")
     probe.add_argument("--context", type=int, required=True, choices=(16384, 32768, 98304))
 
+    train = sub.add_parser("train", help="One-epoch Gemma 4 E4B LoRA at a 32k token cap.")
+    train.add_argument("--context", type=int, default=32768)
+    train.add_argument("--batch-size", type=int, default=1)
+
     args = parser.parse_args()
     if args.cmd == "commissions":
         from playground.commissions import write_commissions
@@ -104,6 +109,11 @@ def main() -> None:
         from playground.probe import run_probe_cli
 
         run_probe_cli(args.context)
+        return
+    if args.cmd == "train":
+        from playground.train import run_train_cli
+
+        run_train_cli(args.context, args.batch_size)
         return
 
 

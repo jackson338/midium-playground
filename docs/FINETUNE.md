@@ -26,6 +26,19 @@ uv run python -m playground probe --context 98304
 
 ## After the map
 
-Pick the largest batch that keeps peak memory under 400GB at 96k. Then run the full LoRA on the committed traces. Eval is SubSWE, same 40 tasks, cap 16, both runs. The baseline is the Gemma 4 E4B SubSWE score once that run finishes. The trained model has to beat that score, then Laguna XS 2.1 (36/40 on run 1). Export a 4-bit checkpoint only after the bf16 LoRA beats the baseline. QAT is a second train, not a quantize of the probe.
+The 32k probe is the train setting. One step at 30,449 tokens used 127GB of Metal memory and 155GB of process footprint, in 70.5 seconds (432 tokens per second). The 55,741-token step used 289GB of Metal memory and 335GB of footprint. A full 96k sequence does not fit under 400GB.
+
+Train one epoch at a 32,768-token cap. About 62 of the 877 train episodes are over 32k; capping them leaves about 16.3 million tokens. Holdout rows are not trained.
+
+- Batch size 1: about 160GB and 10 to 14 hours. This is the first run.
+- Batch size 2: about 290GB and 12 to 20 hours. This is the largest batch under 400GB. It does not reliably finish sooner.
+- Batch size 3: about 430GB. Refused.
+
+```bash
+git pull
+uv run python -m playground train --context 32768 --batch-size 1
+```
+
+The adapter is written to `data/checkpoints/e4b-32k-lora`. A second epoch would roughly double the time. SubSWE eval of that adapter is a later step. The baseline is the Gemma 4 E4B SubSWE score. The trained model has to beat that score, then Laguna XS 2.1 (36/40 on run 1). Export a 4-bit checkpoint only after the bf16 LoRA beats the baseline. QAT is a second train, not a quantize of this run.
 
 Do not change the reader prompt, do not regenerate the 5k, and do not launch the full train from the probe script.
