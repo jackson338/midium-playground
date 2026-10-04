@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from pathlib import Path
 
 from playground.benchmark import check_task, gold_fields
@@ -33,6 +34,7 @@ PUBLISHED_MODELS: tuple[tuple[str, str, int], ...] = (
     (FLASH_TEACHER, "openrouter", 8),
     ("Laguna XS 2.1", "cloud", 2),
 )
+LORA_MODEL = "Gemma 4 E4B LoRA"
 
 
 def load_subswe_tasks() -> list[dict]:
@@ -47,6 +49,8 @@ def trace_path(model: str, run: int) -> Path:
 
 
 def model_spec(model: str) -> tuple[str, int]:
+    if model == LORA_MODEL:
+        return "lora", 1
     for name, route, concurrency in PUBLISHED_MODELS:
         if name == model:
             return route, concurrency
@@ -54,7 +58,14 @@ def model_spec(model: str) -> tuple[str, int]:
     raise SystemExit(f"Unknown SubSWE model {model!r}. Choose one of: {known}")
 
 
-async def run_subswe(cfg: Settings, model: str, run: int, *, grade: bool) -> Path:
+async def run_subswe(
+    cfg: Settings,
+    model: str,
+    run: int,
+    *,
+    grade: bool,
+    adapter: Path | None = None,
+) -> Path:
     route, concurrency = model_spec(model)
     if run not in {1, 2}:
         raise SystemExit("SubSWE run must be 1 or 2.")
@@ -64,7 +75,7 @@ async def run_subswe(cfg: Settings, model: str, run: int, *, grade: bool) -> Pat
     pending = [task for task in tasks if task["id"] not in done]
     if grade:
         cfg.require_midium()
-    student = _student(cfg, model, route)
+    student = _student(cfg, model, route, adapter)
     grader = MidiumCloud(cfg, GRADER_MODEL, timeout=120.0) if grade else None
     sem = asyncio.Semaphore(concurrency)
 
@@ -82,6 +93,43 @@ async def run_subswe(cfg: Settings, model: str, run: int, *, grade: bool) -> Pat
             await grader.aclose()
     print(f"Wrote {dest}", flush=True)
     return dest
+
+
+def score_model(model: str, run: int = 1) -> dict:
+    """Rescore one trace file. Does not require the other published models."""
+    path = trace_path(model, run)
+    if not path.is_file():
+        raise SystemExit(f"No trace file for {model} run {run}: {path}")
+    tasks = {task["id"]: task for task in load_subswe_tasks()}
+    scored = _rescore_file(path, tasks, model, run)
+    _print_report({"runs": {path.name: scored}, "published": {}})
+    return scored
+
+
+def fetch_subswe_repos(tasks: list[dict] | None = None, *, dest_root: Path = ROOT, runner=None) -> None:
+    """Shallow-clone each pinned SubSWE repo. data/repos stays gitignored."""
+    run = runner or subprocess.run
+    seen: dict[str, tuple[str, str]] = {}
+    for task in tasks or load_subswe_tasks():
+        seen[task["repo"]] = (task["commit"], task["path"])
+    for repo, (commit, rel) in seen.items():
+        dest = dest_root / rel
+        if not (dest / ".git").is_dir():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _git(
+                run,
+                ["git", "clone", "--filter=blob:none", "--no-checkout", f"https://github.com/{repo}.git", str(dest)],
+            )
+        _git(run, ["git", "-C", str(dest), "fetch", "--depth", "1", "origin", commit])
+        _git(run, ["git", "-C", str(dest), "checkout", "--detach", commit])
+        print(f"  {repo} @ {commit[:12]}", flush=True)
+
+
+def _git(run, cmd: list[str]) -> None:
+    proc = run(cmd, check=False)
+    code = getattr(proc, "returncode", 0)
+    if code not in (0, None):
+        raise SystemExit(f"Command failed ({code}): {' '.join(cmd)}")
 
 
 def write_report() -> dict:
@@ -280,7 +328,12 @@ async def _grade(grader: MidiumCloud, task: dict, report: str) -> dict:
     return {"grade": grade, "reason": str(parsed.get("reason") or "").strip()}
 
 
-def _student(cfg: Settings, model: str, route: str):
+def _student(cfg: Settings, model: str, route: str, adapter: Path | None = None):
+    if route == "lora":
+        from playground.lora_reader import LoraReader
+        from playground.train import CHECKPOINT_DIR
+
+        return LoraReader(adapter or CHECKPOINT_DIR)
     if route == "local":
         cfg.require_local()
         return MidiumCloud(cfg, model, api_key=cfg.local_api_key, base_url=cfg.local_base_url)

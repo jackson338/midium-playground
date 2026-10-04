@@ -69,6 +69,9 @@ def main() -> None:
     subswe.add_argument("--run", type=int, default=1)
     subswe.add_argument("--report", action="store_true")
     subswe.add_argument("--no-grade", action="store_true")
+    subswe.add_argument("--fetch-repos", action="store_true")
+    subswe.add_argument("--score", default="")
+    subswe.add_argument("--adapter", default="")
 
     probe = sub.add_parser("probe", help="One-step Gemma 4 E4B LoRA memory probe. Studio only.")
     probe.add_argument("--context", type=int, required=True, choices=(16384, 32768, 98304))
@@ -118,15 +121,28 @@ def main() -> None:
 
 
 def _subswe(args: argparse.Namespace) -> None:
-    from playground.subswe import run_subswe, write_report
+    from pathlib import Path
 
+    from playground.config import ROOT
+    from playground.subswe import LORA_MODEL, fetch_subswe_repos, run_subswe, score_model, write_report
+
+    if args.fetch_repos:
+        fetch_subswe_repos()
+        return
+    if args.score:
+        score_model(args.score, args.run)
+        return
     if args.report:
         write_report()
         return
     if not args.model:
-        raise SystemExit("Pass --model or --report.")
+        raise SystemExit("Pass --model, --score, --fetch-repos, or --report.")
+    grade = not args.no_grade and args.model != LORA_MODEL
+    adapter = Path(args.adapter) if args.adapter else None
+    if adapter is not None and not adapter.is_absolute():
+        adapter = ROOT / adapter
     asyncio.run(
-        run_subswe(settings(), args.model, args.run, grade=not args.no_grade)
+        run_subswe(settings(), args.model, args.run, grade=grade, adapter=adapter)
     )
 
 

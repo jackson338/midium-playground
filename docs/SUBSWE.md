@@ -50,3 +50,15 @@ uv run python -m playground subswe --report
 ```
 
 Repeat with `--run 2`. Traces go to `data/benchmarks/subswe/<model>.run<N>.jsonl`. The score file is `data/benchmarks/subswe-report.json`. Local Gemma 4 E4B runs one task at a time. Laguna XS 2.1 stays at concurrency 2. Qwen3.8 Flash Next on OpenRouter runs at concurrency 8.
+
+## Fine-tuned model on the Studio
+
+The adapter is `data/checkpoints/e4b-32k-lora` from the 32k train. It is not in git. The eight task repos are not in the clone either. Fetch them, then run the same reader loop with the adapter loaded. Grading stays off, so no Midium key is required.
+
+```bash
+uv run python -m playground subswe --fetch-repos
+uv run python -m playground subswe --model "Gemma 4 E4B LoRA" --run 1
+uv run python -m playground subswe --score "Gemma 4 E4B LoRA"
+```
+
+`--score` prints that file's pass rate only. It does not require the other models' traces.
