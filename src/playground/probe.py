@@ -261,22 +261,39 @@ def unsloth_one_step(text: str, max_seq_length: int) -> None:
     trainer.train()
 
 
+_ceiling_announced = False
+
+
 def enforce_metal_ceiling() -> None:
-    """Hard-cap MLX wired memory. A SIGTERM cannot stop an in-flight Metal allocation."""
+    """Hard-cap MLX wired memory. A SIGTERM cannot stop an in-flight Metal allocation.
+
+    Unsloth sets ``mx.set_wired_limit`` to most of the machine after import.
+    The ``mx.metal.set_*`` names are deprecated and do not override that.
+    """
+    global _ceiling_announced
     try:
         import mlx.core as mx
     except ImportError:
         return
-    metal = mx.metal
     limit = MEMORY_CEILING_BYTES
-    if hasattr(metal, "set_wired_limit"):
-        metal.set_wired_limit(limit)
-    elif hasattr(mx, "set_wired_limit"):
-        mx.set_wired_limit(limit)
-    if hasattr(metal, "set_memory_limit"):
-        metal.set_memory_limit(limit)
-    if hasattr(metal, "set_cache_limit"):
-        metal.set_cache_limit(min(limit, METAL_CACHE_LIMIT_BYTES))
+    cache = min(limit, METAL_CACHE_LIMIT_BYTES)
+    for name, value in (
+        ("set_wired_limit", limit),
+        ("set_memory_limit", limit),
+        ("set_cache_limit", cache),
+    ):
+        fn = getattr(mx, name, None)
+        if fn is None:
+            fn = getattr(getattr(mx, "metal", None), name, None)
+        if fn is not None:
+            fn(value)
+    if not _ceiling_announced:
+        _ceiling_announced = True
+        print(
+            f"MLX wired limit set to {limit / 1024 ** 3:.0f}GB "
+            f"(cache {cache / 1024 ** 3:.0f}GB).",
+            flush=True,
+        )
 
 
 def phys_footprint() -> int:
