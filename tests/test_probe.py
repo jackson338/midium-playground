@@ -8,6 +8,7 @@ from playground.probe import (
     assert_previous_probe,
     build_messages,
     pack_example,
+    pack_probe_example,
     render_messages,
     select_train_episode,
 )
@@ -84,6 +85,20 @@ def test_gate_refuses_when_peak_crosses_the_ceiling(tmp_path: Path):
     )
     with pytest.raises(SystemExit):
         assert_previous_probe(98304, tmp_path)
+
+
+def test_small_context_skips_an_episode_whose_skeleton_does_not_fit():
+    huge = _episode(["PAGE_A" * 10])
+    huge["id"] = "huge"
+    huge["token_estimate"] = 900
+    huge["commission"] = "Q" * 500
+    small = _episode(["PAGE_B"])
+    small["id"] = "small"
+    small["token_estimate"] = 20
+    packed = pack_probe_example([huge, small], 200, _count)
+    assert packed is not None
+    assert "PAGE_B" in packed["text"]
+    assert "PAGE_A" not in packed["text"]
 
 
 def test_selects_the_longest_train_episode_with_a_page():

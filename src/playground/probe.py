@@ -52,18 +52,27 @@ def probe_path(context: int, probes_dir: Path = PROBES_DIR) -> Path:
     return probes_dir / f"{name}.json"
 
 
+def train_episodes(rows: list[dict]) -> list[dict]:
+    """Train episodes that contain a real read_file page, longest first."""
+    candidates = [row for row in rows if row.get("split") == "train" and _read_pages(row)]
+    return sorted(candidates, key=lambda row: (row.get("token_estimate") or 0, row.get("id") or ""), reverse=True)
+
+
 def select_train_episode(rows: list[dict]) -> dict:
     """Longest train episode that still has a real read_file page."""
-    candidates = []
-    for row in rows:
-        if row.get("split") != "train":
-            continue
-        if not _read_pages(row):
-            continue
-        candidates.append(row)
+    candidates = train_episodes(rows)
     if not candidates:
         raise SystemExit("No train episode with a read_file page in the teacher traces.")
-    return max(candidates, key=lambda row: (row.get("token_estimate") or 0, row.get("id") or ""))
+    return candidates[0]
+
+
+def pack_probe_example(rows: list[dict], limit: int, count_tokens: CountTokens) -> dict | None:
+    """Longest train episode that still fits under ``limit`` after trimming pages."""
+    for episode in train_episodes(rows):
+        packed = pack_example(episode, limit, count_tokens)
+        if packed is not None:
+            return packed
+    return None
 
 
 def build_messages(episode: dict, page_texts: list[str]) -> list[dict]:
@@ -132,9 +141,8 @@ def assert_previous_probe(context: int, probes_dir: Path = PROBES_DIR) -> None:
 def run_probe_cli(context: int) -> None:
     assert_previous_probe(context)
     rows = load_teacher_rows()
-    episode = select_train_episode(rows)
     tokenizer = _load_tokenizer()
-    packed = pack_example(episode, context, tokenizer)
+    packed = pack_probe_example(rows, context, tokenizer)
     path = probe_path(context)
     path.parent.mkdir(parents=True, exist_ok=True)
     if packed is None:
