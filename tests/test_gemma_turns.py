@@ -106,6 +106,20 @@ def test_loss_check_accepts_a_gemma_tool_call_string():
         require_tool_call_loss("no tool call here")
 
 
+def test_loss_check_allows_name_inside_a_tool_response():
+    require_tool_call_loss(
+        '<|tool_call>call:list_files{path:<|"|>src<|"|>}<tool_call|>'
+        '<|tool_response>response:list_files{value:<|"|>'
+        '[{"name": "inference", "path": "inference"}]'
+        '<|"|>}<tool_response|>'
+    )
+    with pytest.raises(SystemExit, match="plain-text adapter"):
+        require_tool_call_loss(
+            '<|tool_call>call:grep{}<tool_call|>'
+            '{"name": "grep", "arguments": {"pattern": "Logger"}}'
+        )
+
+
 def test_checked_train_set_keeps_tool_call_examples():
     rows = [_row("train", "p", commission=f"question {index}") for index in range(3)]
     packed, _skipped = build_checked_tool_train_set(rows, 100000, lambda text: len(text), _render, n=3)

@@ -18,6 +18,11 @@ from playground.probe import _read_pages
 _CALL_OPEN = "<|tool_call>call:"
 _CALL_CLOSE = "<tool_call|>"
 _RESPONSE_OPEN = "<|tool_response>"
+_RESPONSE_CLOSE = "<tool_response|>"
+_TOOL_RESPONSE = re.compile(
+    re.escape(_RESPONSE_OPEN) + r".*?" + re.escape(_RESPONSE_CLOSE),
+    re.DOTALL,
+)
 _STRING = '<|"|>'
 TOOL_TRAIN_EXAMPLES = 100
 
@@ -106,11 +111,16 @@ def build_tool_train_set(rows: list[dict], limit: int, count_tokens, render, n: 
 
 
 def require_tool_call_loss(text: str) -> None:
-    """Stop unless this example is a Gemma tool-call string."""
-    if "<|tool_call>call:" not in text or '{"name"' in text:
+    """Stop unless this example is a Gemma tool-call string.
+
+    ``{"name"`` inside a tool-response span is a real ``list_files`` entry or a
+    page of source. The same text outside that span is the old JSON assistant turn.
+    """
+    assistant = _TOOL_RESPONSE.sub("", text)
+    if "<|tool_call>call:" not in text or '{"name"' in assistant:
         raise SystemExit(
             "Stopping before the 100-example train. The loss string must contain "
-            '<|tool_call>call: and must not contain {"name". '
+            '<|tool_call>call:. An assistant turn of {"name", "arguments"} is refused. '
             "Refusing to train a plain-text adapter."
         )
 
@@ -122,7 +132,7 @@ def build_checked_tool_train_set(
     probe, _probe_skipped = build_tool_train_set(rows, limit, count_tokens, render, n=1)
     require_tool_call_loss(probe[0]["text"])
     print(
-        "Loss check passed on the first example: it contains <|tool_call>call: and not {\"name\".",
+        "Loss check passed on the first example: it contains <|tool_call>call:.",
         flush=True,
     )
     if n <= 1:
