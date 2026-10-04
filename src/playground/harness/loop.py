@@ -37,6 +37,7 @@ async def run_reader(
     work_root: Path,
     objective: str,
     complete: Complete,
+    max_iters: int | None = None,
 ) -> dict[str, Any]:
     """Run one commission. ``complete`` talks to Midium Cloud (or a fake).
 
@@ -56,8 +57,9 @@ async def run_reader(
     nudged = False
     report = ""
     stop_reason = "report"
+    cap = RESEARCH_MAX_ITERS if max_iters is None else max_iters
 
-    for iteration in range(RESEARCH_MAX_ITERS):
+    for iteration in range(cap):
         if iteration >= RESEARCH_WRAPUP_ITER and not nudged:
             messages.append({"role": "system", "content": RESEARCH_WRAPUP})
             nudged = True
@@ -99,10 +101,10 @@ async def run_reader(
     else:
         messages.append({"role": "system", "content": ITER_CAP_WRAPUP})
         message = await complete(messages, None)
-        raw_steps.append({"iteration": RESEARCH_MAX_ITERS, "assistant": message, "tools": None})
+        raw_steps.append({"iteration": cap, "assistant": message, "tools": None})
         thinking, visible = _thinking_from_message(message)
         if thinking:
-            thinking_steps.append({"round": RESEARCH_MAX_ITERS, "text": thinking})
+            thinking_steps.append({"round": cap, "text": thinking})
         report = visible
         stop_reason = "max_tool_iterations"
 

@@ -18,12 +18,12 @@ from playground.config import (
     BENCHMARKS_DIR,
     GRADER_MODEL,
     STUDENT_MODEL,
+    SUBSWE_MAX_ITERS,
     Settings,
     UCE_WORK_ROOT,
 )
 from playground.harness.loop import run_reader
 from playground.harness.tools import TOOL_NAMES
-from playground.score import _args_ok, calls_within_cap
 
 _ABSENCE = re.compile(
     r"("
@@ -64,64 +64,88 @@ def repo_commit(work_root: Path) -> str:
     return proc.stdout.strip()
 
 
+_LEAK = re.compile(r"<\|tool_call>|^[ \t]*call:", re.IGNORECASE | re.MULTILINE)
+_REQUIRED_ARG = {
+    "match_path": "query",
+    "change_directory": "path",
+    "glob": "pattern",
+    "grep": "pattern",
+    "read_file": "path",
+    "os_bash": "command",
+    "web_search": "query",
+    "fetch_url": "url",
+}
+
+
+def gold_fields(task: dict) -> dict:
+    gold = task.get("gold")
+    if not isinstance(gold, dict):
+        gold = {}
+    paths = gold.get("paths")
+    if paths is None and gold.get("path"):
+        paths = [gold["path"]]
+    if isinstance(paths, str):
+        paths = [paths]
+    return {
+        "paths": [str(path) for path in (paths or []) if path],
+        "quote": gold.get("quote") or "",
+        "symbol": gold.get("symbol") or "",
+        "must_read": bool(gold.get("must_read")),
+        "expect_absent": bool(gold.get("expect_absent")),
+        "distractor": gold.get("distractor") or "",
+        "note": gold.get("note") or (task.get("gold") if isinstance(task.get("gold"), str) else ""),
+    }
+
+
 def check_task(task: dict, loop_result: dict, work_root: Path) -> dict:
-    """Deterministic flags. A missing target file makes the task invalid."""
-    checks = task.get("checks") or {}
-    rel_path = (checks.get("path") or "").strip()
-    symbol = (checks.get("symbol") or "").strip()
-    quote = checks.get("quote") or ""
-    must_read = bool(checks.get("must_read"))
-    expect_absent = bool(checks.get("expect_absent"))
-    forbid_absence = bool(checks.get("forbid_absence_claim"))
+    """Deterministic SubSWE flags. A pass is the AND of the checks that apply."""
+    gold = gold_fields(task)
+    kind = task.get("kind") or ""
+    if kind == "read-adjacent":
+        kind = "read"
     report = loop_result.get("report") or ""
     rounds = loop_result.get("tool_rounds") or []
-
-    target = (work_root / rel_path) if rel_path else None
-    invalid = bool(rel_path) and (target is None or not target.is_file())
-    if expect_absent and symbol and _symbol_defined(work_root, symbol):
+    invalid = any(not (work_root / rel).is_file() for rel in gold["paths"])
+    if gold["expect_absent"] and gold["symbol"] and _symbol_defined(work_root, gold["symbol"]):
         invalid = True
 
-    valid_tools = _valid_tools(rounds)
-    stopped = calls_within_cap(rounds, work_root)
-    found_path = _found_path(rounds, work_root, rel_path) if rel_path else True
-    named_path = _report_names_path(report, rel_path) if rel_path else True
-    read_ok, page_covers = _read_status(rounds, work_root, rel_path, quote if must_read else "")
-    report_has_quote = _has_quote(report, quote) if quote and not expect_absent else True
-    symbol_seen = (not symbol) or expect_absent or symbol in report
-    false_absence = bool(forbid_absence and _ABSENCE.search(report))
-    claimed_absent = bool(_ABSENCE.search(report)) if expect_absent else True
+    named_paths = None
+    if gold["paths"]:
+        named_paths = all(_report_names_path(report, rel) for rel in gold["paths"])
+        if kind == "distractor" and gold["distractor"] and _report_names_path(report, gold["distractor"]):
+            named_paths = False
+    read_page = None
+    if gold["must_read"]:
+        opened = all(_file_was_read(rounds, work_root, rel) for rel in gold["paths"]) if gold["paths"] else True
+        if gold["quote"]:
+            read_page = opened and _quote_covered(rounds, gold["quote"]) and gold["quote"] in report
+        else:
+            read_page = opened
+    symbol_seen = None
+    if gold["symbol"] and not gold["expect_absent"]:
+        symbol_seen = gold["symbol"] in report
+    negative_search = None
+    if gold["expect_absent"]:
+        negative_search = _negative_search(rounds, gold["symbol"]) and _ABSENCE.search(report) is not None
+    no_false_absence = None
+    if gold["quote"] and not gold["expect_absent"] and _quote_in_files(work_root, gold["paths"], gold["quote"]):
+        no_false_absence = _ABSENCE.search(report) is None
 
     flags = {
         "invalid": invalid,
-        "valid_tools": valid_tools,
-        "stopped_by_round_8": stopped,
-        "found_path": found_path,
-        "named_path": named_path,
-        "read_file": read_ok if must_read else True,
-        "page_covers_quote": page_covers if must_read and quote else True,
-        "report_has_quote": report_has_quote,
+        "valid_tools": _valid_tools(rounds),
+        "stopped_clean": _stopped_clean(rounds, report, loop_result.get("stop_reason") or ""),
+        "named_paths": named_paths,
+        "read_page": read_page,
         "symbol_seen": symbol_seen,
-        "no_false_absence": not false_absence,
-        "claimed_absent": claimed_absent,
+        "negative_search": negative_search,
+        "no_false_absence": no_false_absence,
     }
-    if invalid:
-        flags["passed"] = False
-    else:
-        flags["passed"] = all(
-            flags[key]
-            for key in (
-                "valid_tools",
-                "stopped_by_round_8",
-                "found_path",
-                "named_path",
-                "read_file",
-                "page_covers_quote",
-                "report_has_quote",
-                "symbol_seen",
-                "no_false_absence",
-                "claimed_absent",
-            )
-        )
+    applicable = [flags["valid_tools"], flags["stopped_clean"]]
+    for key in ("named_paths", "read_page", "symbol_seen", "negative_search", "no_false_absence"):
+        if flags[key] is not None:
+            applicable.append(flags[key])
+    flags["passed"] = (not invalid) and all(applicable)
     return flags
 
 
@@ -214,7 +238,7 @@ async def _one(student: MidiumCloud, grader: MidiumCloud | None, task: dict, roo
         return {
             "id": task["id"],
             "kind": task.get("kind"),
-            "deterministic": {"passed": False, "invalid": False, "error": str(exc)},
+            "deterministic": {"passed": False, "invalid": True, "error": str(exc)},
             "semantic": None,
             "report": "",
             "error": str(exc),
@@ -241,7 +265,7 @@ async def _one(student: MidiumCloud, grader: MidiumCloud | None, task: dict, roo
 async def _grade(grader: MidiumCloud, task: dict, report: str) -> dict:
     user = (
         f"Objective:\n{task.get('objective')}\n\n"
-        f"Gold note:\n{task.get('gold')}\n\n"
+        f"Gold note:\n{gold_fields(task)['note']}\n\n"
         f"Report:\n{report or '(empty)'}"
     )
     try:
@@ -286,12 +310,79 @@ def _summarize(label: str, root: Path, rows: list[dict], *, graded: bool) -> dic
     }
 
 
+def _stopped_clean(rounds: list[dict], report: str, stop_reason: str) -> bool:
+    if len(rounds) > SUBSWE_MAX_ITERS or stop_reason != "report" or not report.strip():
+        return False
+    return _LEAK.search(report) is None
+
+
 def _valid_tools(rounds: list[dict]) -> bool:
     for item in rounds:
         name = item.get("name")
-        if name not in TOOL_NAMES or not _args_ok(name, item.get("arguments") or {}):
+        args = item.get("arguments") or {}
+        if name not in TOOL_NAMES or not isinstance(args, dict):
             return False
+        required = _REQUIRED_ARG.get(name)
+        if required and not (isinstance(args.get(required), str) and args.get(required).strip()):
+            return False
+        if name == "read_file":
+            for key in ("start_line", "end_line"):
+                if key not in args:
+                    continue
+                value = args[key]
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return False
     return True
+
+
+def _file_was_read(rounds: list[dict], work_root: Path, rel_path: str) -> bool:
+    want = rel_path.replace("\\", "/")
+    for item in rounds:
+        if item.get("name") != "read_file":
+            continue
+        result = item.get("result") or {}
+        if result.get("error"):
+            continue
+        raw = (item.get("arguments") or {}).get("path") or result.get("path") or ""
+        rel = _as_rel(work_root, str(raw))
+        if rel == want or rel.endswith("/" + want):
+            return True
+    return False
+
+
+def _quote_covered(rounds: list[dict], quote: str) -> bool:
+    for item in rounds:
+        if item.get("name") != "read_file":
+            continue
+        content = (item.get("result") or {}).get("content") or ""
+        if quote in content:
+            return True
+    return False
+
+
+def _quote_in_files(work_root: Path, paths: list[str], quote: str) -> bool:
+    for rel in paths:
+        file_path = work_root / rel
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if quote in text:
+            return True
+    return False
+
+
+def _negative_search(rounds: list[dict], symbol: str) -> bool:
+    if not symbol:
+        return False
+    for item in rounds:
+        name = item.get("name")
+        if name not in {"grep", "read_file"}:
+            continue
+        blob = json.dumps(item.get("arguments") or {}, ensure_ascii=False)
+        if symbol in blob:
+            return True
+    return False
 
 
 def _found_path(rounds: list[dict], work_root: Path, rel_path: str) -> bool:

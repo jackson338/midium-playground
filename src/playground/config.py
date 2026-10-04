@@ -15,7 +15,10 @@ TRACES_DIR = ROOT / "data" / "traces"
 COMMISSIONS_PATH = ROOT / "data" / "commissions" / "commissions.jsonl"
 SMOKE_COMMISSIONS_PATH = ROOT / "data" / "commissions" / "smoke.jsonl"
 SMOKE_REPORT_PATH = TRACES_DIR / "smoke_report.json"
-BENCHMARK_TASKS_PATH = ROOT / "benchmarks" / "tasks.json"
+BENCHMARK_TASKS_PATH = ROOT / "benchmarks" / "uce-smoke.json"
+SUBSWE_TASKS_PATH = ROOT / "benchmarks" / "subswe.json"
+SUBSWE_DIR = ROOT / "data" / "benchmarks" / "subswe"
+SUBSWE_REPORT_PATH = ROOT / "data" / "benchmarks" / "subswe-report.json"
 BENCHMARKS_DIR = ROOT / "data" / "benchmarks"
 UCE_WORK_ROOT = Path(
     "/Users/jacksonoaks/Documents/business/recursion_ai/courier/unified_compute_engine"
@@ -27,6 +30,16 @@ GRADER_MODEL = "Gemma 4 26B A4B"
 
 # Same commissions for every smoke teacher.
 SMOKE_COMMISSIONS = 2
+
+# Enough episodes to see if the LoRA moves the E4B baseline.
+TRAIN_EPISODES = 1000
+TRAIN_REPOS = 200
+TRAIN_PER_REPO = 13
+OPENROUTER_CONCURRENCY = 8
+MIDIUM_MAX_CONCURRENCY = 2
+
+# Reader teacher on OpenRouter. The API slug is OPENROUTER_MODEL.
+FLASH_TEACHER = "Qwen3.8 Flash Next"
 
 # Served names on Midium Cloud (cloud: tag stripped). Smoke runs in this order.
 TEACHERS: tuple[str, ...] = (
@@ -42,6 +55,8 @@ LONG_TRACE_MIN_TOKENS = 32_000
 
 RESEARCH_WRAPUP_ITER = 6
 RESEARCH_MAX_ITERS = 8
+# SubSWE only. Teacher traces stay on the 8-iteration reader cap.
+SUBSWE_MAX_ITERS = 16
 
 # Our product trees. A GitHub repo whose name matches is never cloned.
 HOLDOUT_REPO_NAMES = frozenset(

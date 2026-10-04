@@ -38,19 +38,19 @@ uv run python -m playground benchmark compare e4b-baseline after-lora
 uv run python -m playground smoke
 ```
 
-Commissions. Clones about 200 permissive repos and asks Flash for 25 objectives in each (about 5,000). Repo calls and model calls run concurrently.
+Commissions. Clones about 200 permissive repos and asks Flash for 13 objectives in each. OpenRouter concurrency is 8.
 
 ```bash
-uv run python -m playground commissions --repos 200 --per-repo 25 --concurrency 16
+uv run python -m playground commissions --repos 200 --per-repo 13 --concurrency 8
 ```
 
-Full set, after you choose a teacher from the smoke report. `--teacher` is required. Anything over 96k tokens is dropped.
+Full set. The teacher is Qwen3.8 Flash Next on OpenRouter, and the run is 1,000 episodes at concurrency 8. A 500 on a completion is retried before the episode is dropped. Anything over 96k tokens is dropped.
 
 ```bash
-uv run python -m playground generate --teacher "Laguna S 2.1" --n 5000
+uv run python -m playground generate --teacher "Qwen3.8 Flash Next" --n 1000 --concurrency 8
 ```
 
-The other served names are `Laguna XS 2.1` and `Qwen3.8 27B`.
+The other served names are `Laguna S 2.1` and `Qwen3.8 27B`.
 
 ## Studio handoff
 

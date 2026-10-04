@@ -1,0 +1,122 @@
+[
+  {
+    "id": "locate-research-junior-tools",
+    "kind": "locate",
+    "private": true,
+    "objective": "Find the function research_junior_tools. Name the file that defines it.",
+    "gold": {
+      "paths": [
+        "src/scout/code/commissions.py"
+      ],
+      "symbol": "research_junior_tools",
+      "must_read": false,
+      "expect_absent": false,
+      "note": "research_junior_tools is defined in src/scout/code/commissions.py. It returns the research junior's read and web tools, including _make_smart_read_file."
+    }
+  },
+  {
+    "id": "locate-research-iters",
+    "kind": "locate",
+    "private": true,
+    "objective": "Find the constant _RESEARCH_ITERS. Report its default integer and the file that defines it.",
+    "gold": {
+      "paths": [
+        "src/scout/code/commissions.py"
+      ],
+      "symbol": "_RESEARCH_ITERS",
+      "quote": "8",
+      "must_read": false,
+      "expect_absent": false,
+      "note": "_RESEARCH_ITERS is in src/scout/code/commissions.py. The default is 8, from the env var UCE_CODE_COMMISSION_RESEARCH_ITERS."
+    }
+  },
+  {
+    "id": "locate-format-research-skill",
+    "kind": "locate",
+    "private": true,
+    "objective": "Find the function format_research_skill. Name the file that defines it.",
+    "gold": {
+      "paths": [
+        "src/scout/code/prompts.py"
+      ],
+      "symbol": "format_research_skill",
+      "must_read": false,
+      "expect_absent": false,
+      "note": "format_research_skill is defined in src/scout/code/prompts.py and fills RESEARCH_SKILL with the workspace root."
+    }
+  },
+  {
+    "id": "read-adjacent-wrapup",
+    "kind": "read",
+    "private": true,
+    "objective": "Find RESEARCH_WRAPUP and quote the message the researcher is told to stop exploring.",
+    "gold": {
+      "paths": [
+        "src/scout/oa/runner.py"
+      ],
+      "symbol": "RESEARCH_WRAPUP",
+      "quote": "Stop exploring. Write the report now from what you already have.",
+      "must_read": true,
+      "expect_absent": false,
+      "note": "RESEARCH_WRAPUP is in src/scout/oa/runner.py, immediately after RESEARCH_WRAPUP_ITER. The message begins: Stop exploring. Write the report now from what you already have."
+    }
+  },
+  {
+    "id": "read-adjacent-wrapup-at",
+    "kind": "read",
+    "private": true,
+    "objective": "Find the function research_wrapup_at and quote its return expression.",
+    "gold": {
+      "paths": [
+        "src/scout/oa/runner.py"
+      ],
+      "symbol": "research_wrapup_at",
+      "quote": "min(RESEARCH_WRAPUP_ITER, max(1, cap - 2))",
+      "must_read": true,
+      "expect_absent": false,
+      "note": "research_wrapup_at is in src/scout/oa/runner.py. It returns min(RESEARCH_WRAPUP_ITER, max(1, cap - 2))."
+    }
+  },
+  {
+    "id": "paraphrase-research-prompt",
+    "kind": "paraphrase",
+    "private": true,
+    "objective": "Where is the system prompt for the Code research junior? What does it say the final assistant message is? Do not invent a filename from the question. Search the repo.",
+    "gold": {
+      "paths": [
+        "src/scout/code/prompts.py"
+      ],
+      "must_read": false,
+      "expect_absent": false,
+      "note": "The prompt is RESEARCH_SKILL in src/scout/code/prompts.py. It says the final assistant message IS the report and there is no submit tool."
+    }
+  },
+  {
+    "id": "paraphrase-smart-read",
+    "kind": "paraphrase",
+    "private": true,
+    "objective": "Which read helper does the research junior bind: the raw paged reader, or the one that summarizes long files? Name that helper and the file where the junior's tool list is built.",
+    "gold": {
+      "paths": [
+        "src/scout/code/commissions.py"
+      ],
+      "symbol": "_make_smart_read_file",
+      "must_read": false,
+      "expect_absent": false,
+      "note": "research_junior_tools in src/scout/code/commissions.py binds _make_smart_read_file, the digest reader, not the raw _make_read_file pager."
+    }
+  },
+  {
+    "id": "negative-missing-symbol",
+    "kind": "negative",
+    "private": true,
+    "objective": "Find the function definitely_not_in_uce_reader_xyz. If it is not in this repo, say so.",
+    "gold": {
+      "paths": [],
+      "symbol": "definitely_not_in_uce_reader_xyz",
+      "must_read": false,
+      "expect_absent": true,
+      "note": "definitely_not_in_uce_reader_xyz does not exist. A correct report says it is absent. Tool calls must still be well-formed."
+    }
+  }
+]

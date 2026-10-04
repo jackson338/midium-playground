@@ -1,6 +1,6 @@
 # Data layout
 
-The Mac Studio LoRA job does not talk to Midium Cloud or OpenRouter. Copy the trace files onto the Studio next to a clone of this repo.
+The Mac Studio LoRA job does not talk to Midium Cloud or OpenRouter. A clone of this repo already contains the teacher traces.
 
 ## On the MacBook
 
@@ -11,7 +11,7 @@ The Mac Studio LoRA job does not talk to Midium Cloud or OpenRouter. Copy the tr
 | `data/commissions/smoke.jsonl` | The 2 commissions used for every smoke teacher. |
 | `data/traces/smoke_report.json` | Scores for Laguna S 2.1, Laguna XS 2.1, and Qwen3.8 27B. Nothing in this file picks a winner. |
 | `data/traces/smoke/` | Smoke episodes, one JSONL per teacher. |
-| `data/traces/<teacher>.jsonl` | Full set after you choose a teacher. |
+| `data/traces/qwen3-8-flash-next.part1.jsonl` and `part2.jsonl` | Teacher set committed for the Studio, split so each file stays under GitHub's 100MB limit. |
 | `data/traces/dry.jsonl` | Scripted dry run. No credentials. |
 | `data/benchmarks/e4b-baseline.json` | Gemma 4 E4B reader baseline. Compare a later label with `benchmark compare`. |
 
@@ -32,7 +32,8 @@ Episodes whose token estimate is over 96k are not written.
 
 ```text
 git clone <this repo>
-# copy the SSD's data/traces/ onto data/traces/ beside that clone
+uv sync --group studio
+uv run python -m playground probe --context 16384
 ```
 
-The train reads `data/traces/` only.
+No SSD copy and no Midium or OpenRouter keys. Weights are not in the repo. The first probe downloads `unsloth/gemma-4-E4B-it` into the Hugging Face cache. The train reads `data/traces/qwen3-8-flash-next.part1.jsonl` and `part2.jsonl`.

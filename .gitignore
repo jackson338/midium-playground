@@ -6,5 +6,11 @@ __pycache__/
 .ruff_cache/
 .env
 data/repos/
-data/traces/
 data/commissions/
+data/benchmarks/subswe/
+data/benchmarks/subswe-report.json
+data/traces/qwen3-8-flash-next.jsonl
+data/traces/smoke/
+data/traces/dry.jsonl
+data/traces/smoke_report.json
+data/probes/

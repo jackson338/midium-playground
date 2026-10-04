@@ -54,14 +54,14 @@ Same 2 commissions on Laguna XS 2.1, Laguna S 2.1, and Qwen3.8 27B via Midium. S
 
 ## Full set
 
-`--teacher` is required. Target 5,000 commissions. Pack real `read_file` pages so many transcripts land between 32k and 96k tokens. Hold out any repo that is one of our product trees. One JSONL row per episode: id, repo, commit, teacher, commission, tool rounds (name, args, raw page), thinking, final report, token estimate, char length, split.
+`--teacher` is required. Target 1,000 episodes, with Qwen3.8 Flash Next on OpenRouter as the teacher. Pack real `read_file` pages so many transcripts land between 32k and 96k tokens. Hold out any repo that is one of our product trees. One JSONL row per episode: id, repo, commit, teacher, commission, tool rounds (name, args, raw page), thinking, final report, token estimate, char length, split.
 
 ## MacBook commands
 
 - `uv sync`
 - fill `.env`
 - `uv run python -m playground smoke`
-- `uv run python -m playground generate --teacher <name> --n 5000`
+- `uv run python -m playground generate --teacher "Qwen3.8 Flash Next" --n 1000 --concurrency 8`
 
 ## Studio handoff
 

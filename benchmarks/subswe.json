@@ -1,0 +1,719 @@
+[
+  {
+    "id": "locate-loguru-logger",
+    "kind": "locate",
+    "repo": "Delgan/loguru",
+    "commit": "0412a60d6aff63a4ed009c7445993b42d294c2f1",
+    "license": "MIT",
+    "path": "data/repos/Delgan__loguru",
+    "objective": "Find the class Logger. Name the file that defines it.",
+    "gold": {
+      "paths": [
+        "loguru/_logger.py"
+      ],
+      "symbol": "Logger",
+      "note": "class Logger is defined in loguru/_logger.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "locate-typer-class",
+    "kind": "locate",
+    "repo": "fastapi/typer",
+    "commit": "a80f6e5ecd74f32b983cca336a2f3cba98d9853a",
+    "license": "MIT",
+    "path": "data/repos/fastapi__typer",
+    "objective": "Find the class Typer. Name the file that defines it.",
+    "gold": {
+      "paths": [
+        "typer/main.py"
+      ],
+      "symbol": "Typer",
+      "note": "class Typer is defined in typer/main.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "locate-sanic-class",
+    "kind": "locate",
+    "repo": "sanic-org/sanic",
+    "commit": "5ffc7b3710838eaf016d2f9612a86a08626915e5",
+    "license": "MIT",
+    "path": "data/repos/sanic-org__sanic",
+    "objective": "Find the class Sanic. Name the file that defines the web application class, not a CLI helper.",
+    "gold": {
+      "paths": [
+        "sanic/app.py"
+      ],
+      "symbol": "Sanic",
+      "note": "class Sanic is defined in sanic/app.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "locate-binary-search",
+    "kind": "locate",
+    "repo": "keon/algorithms",
+    "commit": "bd1d152f9ec7331c69be662831610b003b10fc7a",
+    "license": "MIT",
+    "path": "data/repos/keon__algorithms",
+    "objective": "Find the function binary_search. Name the file that defines it.",
+    "gold": {
+      "paths": [
+        "algorithms/searching/binary_search.py"
+      ],
+      "symbol": "binary_search",
+      "note": "binary_search is defined in algorithms/searching/binary_search.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "locate-gooey-decorator",
+    "kind": "locate",
+    "repo": "chriskiehl/Gooey",
+    "commit": "c4994c12f1826034525a5e5cca184e16c0092ff1",
+    "license": "MIT",
+    "path": "data/repos/chriskiehl__Gooey",
+    "objective": "Find the function Gooey. Name the file that defines that decorator.",
+    "gold": {
+      "paths": [
+        "gooey/python_bindings/gooey_decorator.py"
+      ],
+      "symbol": "Gooey",
+      "note": "def Gooey is in gooey/python_bindings/gooey_decorator.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "locate-sqlmodel-class",
+    "kind": "locate",
+    "repo": "fastapi/sqlmodel",
+    "commit": "c1db37d4aa73bc0879d545f6393c7f83f614aeb6",
+    "license": "MIT",
+    "path": "data/repos/fastapi__sqlmodel",
+    "objective": "Find the class SQLModel. Name the file that defines it.",
+    "gold": {
+      "paths": [
+        "sqlmodel/main.py"
+      ],
+      "symbol": "SQLModel",
+      "note": "class SQLModel is defined in sqlmodel/main.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "read-loguru-logger",
+    "kind": "read",
+    "repo": "Delgan/loguru",
+    "commit": "0412a60d6aff63a4ed009c7445993b42d294c2f1",
+    "license": "MIT",
+    "path": "data/repos/Delgan__loguru",
+    "objective": "Open the file that defines class Logger and quote the class statement.",
+    "gold": {
+      "paths": [
+        "loguru/_logger.py"
+      ],
+      "symbol": "Logger",
+      "must_read": true,
+      "quote": "class Logger:",
+      "note": "The class statement is exactly: class Logger:",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "read-binary-search",
+    "kind": "read",
+    "repo": "keon/algorithms",
+    "commit": "bd1d152f9ec7331c69be662831610b003b10fc7a",
+    "license": "MIT",
+    "path": "data/repos/keon__algorithms",
+    "objective": "Open the definition of binary_search and quote its signature line.",
+    "gold": {
+      "paths": [
+        "algorithms/searching/binary_search.py"
+      ],
+      "symbol": "binary_search",
+      "must_read": true,
+      "quote": "def binary_search(array: list[int], query: int) -> int:",
+      "note": "Quote the signature def binary_search(array: list[int], query: int) -> int:",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "read-gooey-signature",
+    "kind": "read",
+    "repo": "chriskiehl/Gooey",
+    "commit": "c4994c12f1826034525a5e5cca184e16c0092ff1",
+    "license": "MIT",
+    "path": "data/repos/chriskiehl__Gooey",
+    "objective": "Open the Gooey decorator and quote its def line.",
+    "gold": {
+      "paths": [
+        "gooey/python_bindings/gooey_decorator.py"
+      ],
+      "symbol": "Gooey",
+      "must_read": true,
+      "quote": "def Gooey(f=None, **gkwargs):",
+      "note": "The decorator line is def Gooey(f=None, **gkwargs):",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "read-sqlmodel-session",
+    "kind": "read",
+    "repo": "fastapi/sqlmodel",
+    "commit": "c1db37d4aa73bc0879d545f6393c7f83f614aeb6",
+    "license": "MIT",
+    "path": "data/repos/fastapi__sqlmodel",
+    "objective": "Open the synchronous Session class and quote its class statement.",
+    "gold": {
+      "paths": [
+        "sqlmodel/orm/session.py"
+      ],
+      "symbol": "Session",
+      "must_read": true,
+      "quote": "class Session(_Session):",
+      "note": "class Session(_Session): is in sqlmodel/orm/session.py.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "read-dijkstra-class",
+    "kind": "read",
+    "repo": "keon/algorithms",
+    "commit": "bd1d152f9ec7331c69be662831610b003b10fc7a",
+    "license": "MIT",
+    "path": "data/repos/keon__algorithms",
+    "objective": "Open the Dijkstra class and quote its class statement.",
+    "gold": {
+      "paths": [
+        "algorithms/graph/dijkstra.py"
+      ],
+      "symbol": "Dijkstra",
+      "must_read": true,
+      "quote": "class Dijkstra:",
+      "note": "class Dijkstra: is in algorithms/graph/dijkstra.py.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "read-wormhole-framer",
+    "kind": "read",
+    "repo": "magic-wormhole/magic-wormhole",
+    "commit": "cc6160670bf7faaab52ba307e3f8ba95e80529fe",
+    "license": "MIT",
+    "path": "data/repos/magic-wormhole__magic-wormhole",
+    "objective": "Open the dilation connection module and quote the IFramer class statement.",
+    "gold": {
+      "paths": [
+        "src/wormhole/_dilation/connection.py"
+      ],
+      "symbol": "IFramer",
+      "must_read": true,
+      "quote": "class IFramer(Interface):",
+      "note": "class IFramer(Interface): is in src/wormhole/_dilation/connection.py.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "paraphrase-loguru-sinks",
+    "kind": "paraphrase",
+    "repo": "Delgan/loguru",
+    "commit": "0412a60d6aff63a4ed009c7445993b42d294c2f1",
+    "license": "MIT",
+    "path": "data/repos/Delgan__loguru",
+    "objective": "Where is the logger type that can add a sink and later remove it? Name the file. Do not guess a path that is not in the repo.",
+    "gold": {
+      "paths": [
+        "loguru/_logger.py"
+      ],
+      "note": "The logger type lives in loguru/_logger.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "paraphrase-sqlmodel-sync-session",
+    "kind": "paraphrase",
+    "repo": "fastapi/sqlmodel",
+    "commit": "c1db37d4aa73bc0879d545f6393c7f83f614aeb6",
+    "license": "MIT",
+    "path": "data/repos/fastapi__sqlmodel",
+    "objective": "Where is the synchronous database session wrapper around SQLAlchemy's Session? Name that file.",
+    "gold": {
+      "paths": [
+        "sqlmodel/orm/session.py"
+      ],
+      "note": "The sync session wrapper is sqlmodel/orm/session.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "paraphrase-typer-argument",
+    "kind": "paraphrase",
+    "repo": "fastapi/typer",
+    "commit": "a80f6e5ecd74f32b983cca336a2f3cba98d9853a",
+    "license": "MIT",
+    "path": "data/repos/fastapi__typer",
+    "objective": "Where is the helper that declares a CLI argument (as opposed to an option)? Name the file.",
+    "gold": {
+      "paths": [
+        "typer/params.py"
+      ],
+      "note": "Argument is declared in typer/params.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "paraphrase-polynomial",
+    "kind": "paraphrase",
+    "repo": "keon/algorithms",
+    "commit": "bd1d152f9ec7331c69be662831610b003b10fc7a",
+    "license": "MIT",
+    "path": "data/repos/keon__algorithms",
+    "objective": "Where is the polynomial arithmetic implementation, including division? Name the file.",
+    "gold": {
+      "paths": [
+        "algorithms/math/polynomial.py"
+      ],
+      "note": "Polynomial arithmetic is algorithms/math/polynomial.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "paraphrase-video-model",
+    "kind": "paraphrase",
+    "repo": "lucidrains/vit-pytorch",
+    "commit": "c3622978f68a114b5ae45c4322b54391b24f5c3d",
+    "license": "MIT",
+    "path": "data/repos/lucidrains__vit-pytorch",
+    "objective": "Where is the video-or-image model implemented in vaat.py? Name that file.",
+    "gold": {
+      "paths": [
+        "vit_pytorch/vaat.py"
+      ],
+      "note": "The video model file is vit_pytorch/vaat.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "paraphrase-transit",
+    "kind": "paraphrase",
+    "repo": "magic-wormhole/magic-wormhole",
+    "commit": "cc6160670bf7faaab52ba307e3f8ba95e80529fe",
+    "license": "MIT",
+    "path": "data/repos/magic-wormhole__magic-wormhole",
+    "objective": "Where is the transit relay connection logic that picks a single winning connection? Name the file.",
+    "gold": {
+      "paths": [
+        "src/wormhole/transit.py"
+      ],
+      "note": "Transit relay logic is src/wormhole/transit.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "negative-loguru",
+    "kind": "negative",
+    "repo": "Delgan/loguru",
+    "commit": "0412a60d6aff63a4ed009c7445993b42d294c2f1",
+    "license": "MIT",
+    "path": "data/repos/Delgan__loguru",
+    "objective": "Find the function definitely_not_in_loguru_xyz. If it is not in this repo, say so.",
+    "gold": {
+      "paths": [],
+      "symbol": "definitely_not_in_loguru_xyz",
+      "expect_absent": true,
+      "note": "definitely_not_in_loguru_xyz does not exist. A correct report says it is absent after searching for that name.",
+      "must_read": false
+    }
+  },
+  {
+    "id": "negative-sqlmodel",
+    "kind": "negative",
+    "repo": "fastapi/sqlmodel",
+    "commit": "c1db37d4aa73bc0879d545f6393c7f83f614aeb6",
+    "license": "MIT",
+    "path": "data/repos/fastapi__sqlmodel",
+    "objective": "Find the function definitely_not_in_sqlmodel_xyz. If it is not in this repo, say so.",
+    "gold": {
+      "paths": [],
+      "symbol": "definitely_not_in_sqlmodel_xyz",
+      "expect_absent": true,
+      "note": "definitely_not_in_sqlmodel_xyz does not exist. A correct report says it is absent after searching for that name.",
+      "must_read": false
+    }
+  },
+  {
+    "id": "negative-typer",
+    "kind": "negative",
+    "repo": "fastapi/typer",
+    "commit": "a80f6e5ecd74f32b983cca336a2f3cba98d9853a",
+    "license": "MIT",
+    "path": "data/repos/fastapi__typer",
+    "objective": "Find the function definitely_not_in_typer_xyz. If it is not in this repo, say so.",
+    "gold": {
+      "paths": [],
+      "symbol": "definitely_not_in_typer_xyz",
+      "expect_absent": true,
+      "note": "definitely_not_in_typer_xyz does not exist. A correct report says it is absent after searching for that name.",
+      "must_read": false
+    }
+  },
+  {
+    "id": "negative-sanic",
+    "kind": "negative",
+    "repo": "sanic-org/sanic",
+    "commit": "5ffc7b3710838eaf016d2f9612a86a08626915e5",
+    "license": "MIT",
+    "path": "data/repos/sanic-org__sanic",
+    "objective": "Find the function definitely_not_in_sanic_xyz. If it is not in this repo, say so.",
+    "gold": {
+      "paths": [],
+      "symbol": "definitely_not_in_sanic_xyz",
+      "expect_absent": true,
+      "note": "definitely_not_in_sanic_xyz does not exist. A correct report says it is absent after searching for that name.",
+      "must_read": false
+    }
+  },
+  {
+    "id": "negative-algorithms",
+    "kind": "negative",
+    "repo": "keon/algorithms",
+    "commit": "bd1d152f9ec7331c69be662831610b003b10fc7a",
+    "license": "MIT",
+    "path": "data/repos/keon__algorithms",
+    "objective": "Find the function definitely_not_in_algorithms_xyz. If it is not in this repo, say so.",
+    "gold": {
+      "paths": [],
+      "symbol": "definitely_not_in_algorithms_xyz",
+      "expect_absent": true,
+      "note": "definitely_not_in_algorithms_xyz does not exist. A correct report says it is absent after searching for that name.",
+      "must_read": false
+    }
+  },
+  {
+    "id": "negative-gooey",
+    "kind": "negative",
+    "repo": "chriskiehl/Gooey",
+    "commit": "c4994c12f1826034525a5e5cca184e16c0092ff1",
+    "license": "MIT",
+    "path": "data/repos/chriskiehl__Gooey",
+    "objective": "Find the function definitely_not_in_gooey_xyz. If it is not in this repo, say so.",
+    "gold": {
+      "paths": [],
+      "symbol": "definitely_not_in_gooey_xyz",
+      "expect_absent": true,
+      "note": "definitely_not_in_gooey_xyz does not exist. A correct report says it is absent after searching for that name.",
+      "must_read": false
+    }
+  },
+  {
+    "id": "multi-loguru-logger-handler",
+    "kind": "multi-file",
+    "repo": "Delgan/loguru",
+    "commit": "0412a60d6aff63a4ed009c7445993b42d294c2f1",
+    "license": "MIT",
+    "path": "data/repos/Delgan__loguru",
+    "objective": "Read both loguru/_logger.py and loguru/_handler.py. Name both files in the report.",
+    "gold": {
+      "paths": [
+        "loguru/_logger.py",
+        "loguru/_handler.py"
+      ],
+      "must_read": true,
+      "note": "Both loguru/_logger.py and loguru/_handler.py must be opened and named.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "multi-sqlmodel-model-session",
+    "kind": "multi-file",
+    "repo": "fastapi/sqlmodel",
+    "commit": "c1db37d4aa73bc0879d545f6393c7f83f614aeb6",
+    "license": "MIT",
+    "path": "data/repos/fastapi__sqlmodel",
+    "objective": "Read both sqlmodel/main.py and sqlmodel/orm/session.py. Name both files in the report.",
+    "gold": {
+      "paths": [
+        "sqlmodel/main.py",
+        "sqlmodel/orm/session.py"
+      ],
+      "must_read": true,
+      "note": "Both sqlmodel/main.py and sqlmodel/orm/session.py must be opened and named.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "multi-typer-main-params",
+    "kind": "multi-file",
+    "repo": "fastapi/typer",
+    "commit": "a80f6e5ecd74f32b983cca336a2f3cba98d9853a",
+    "license": "MIT",
+    "path": "data/repos/fastapi__typer",
+    "objective": "Read both typer/main.py and typer/params.py. Name both files in the report.",
+    "gold": {
+      "paths": [
+        "typer/main.py",
+        "typer/params.py"
+      ],
+      "must_read": true,
+      "note": "Both typer/main.py and typer/params.py must be opened and named.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "multi-sanic-app-blueprints",
+    "kind": "multi-file",
+    "repo": "sanic-org/sanic",
+    "commit": "5ffc7b3710838eaf016d2f9612a86a08626915e5",
+    "license": "MIT",
+    "path": "data/repos/sanic-org__sanic",
+    "objective": "Read both sanic/app.py and sanic/blueprints.py. Name both files in the report.",
+    "gold": {
+      "paths": [
+        "sanic/app.py",
+        "sanic/blueprints.py"
+      ],
+      "must_read": true,
+      "note": "Both sanic/app.py and sanic/blueprints.py must be opened and named.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "multi-dijkstra-pair",
+    "kind": "multi-file",
+    "repo": "keon/algorithms",
+    "commit": "bd1d152f9ec7331c69be662831610b003b10fc7a",
+    "license": "MIT",
+    "path": "data/repos/keon__algorithms",
+    "objective": "Read both algorithms/graph/dijkstra.py and algorithms/graph/dijkstra_heapq.py. Name both files in the report.",
+    "gold": {
+      "paths": [
+        "algorithms/graph/dijkstra.py",
+        "algorithms/graph/dijkstra_heapq.py"
+      ],
+      "must_read": true,
+      "note": "Both dijkstra.py and dijkstra_heapq.py must be opened and named.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "multi-wormhole-transit-manager",
+    "kind": "multi-file",
+    "repo": "magic-wormhole/magic-wormhole",
+    "commit": "cc6160670bf7faaab52ba307e3f8ba95e80529fe",
+    "license": "MIT",
+    "path": "data/repos/magic-wormhole__magic-wormhole",
+    "objective": "Read both src/wormhole/transit.py and src/wormhole/_dilation/manager.py. Name both files in the report.",
+    "gold": {
+      "paths": [
+        "src/wormhole/transit.py",
+        "src/wormhole/_dilation/manager.py"
+      ],
+      "must_read": true,
+      "note": "Both transit.py and _dilation/manager.py must be opened and named.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "long-loguru-remove",
+    "kind": "long-page",
+    "repo": "Delgan/loguru",
+    "commit": "0412a60d6aff63a4ed009c7445993b42d294c2f1",
+    "license": "MIT",
+    "path": "data/repos/Delgan__loguru",
+    "objective": "Find Logger.remove and quote the sentence that says what removing a handler does to its sink.",
+    "gold": {
+      "paths": [
+        "loguru/_logger.py"
+      ],
+      "symbol": "remove",
+      "must_read": true,
+      "quote": "Remove a previously added handler and stop sending logs to its sink.",
+      "note": "The sentence is past line 500 in loguru/_logger.py.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "long-sqlmodel-relationship",
+    "kind": "long-page",
+    "repo": "fastapi/sqlmodel",
+    "commit": "c1db37d4aa73bc0879d545f6393c7f83f614aeb6",
+    "license": "MIT",
+    "path": "data/repos/fastapi__sqlmodel",
+    "objective": "In sqlmodel/main.py, open SQLModelMetaclass.__new__ and quote the line that creates the relationships dict.",
+    "gold": {
+      "paths": [
+        "sqlmodel/main.py"
+      ],
+      "symbol": "SQLModelMetaclass",
+      "must_read": true,
+      "quote": "relationships: dict[str, RelationshipInfo] = {}",
+      "note": "That line is past line 500 in sqlmodel/main.py.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "long-typer-get-group",
+    "kind": "long-page",
+    "repo": "fastapi/typer",
+    "commit": "a80f6e5ecd74f32b983cca336a2f3cba98d9853a",
+    "license": "MIT",
+    "path": "data/repos/fastapi__typer",
+    "objective": "Find get_group and quote its full signature line.",
+    "gold": {
+      "paths": [
+        "typer/main.py"
+      ],
+      "symbol": "get_group",
+      "must_read": true,
+      "quote": "def get_group(typer_instance: Typer) -> TyperGroup:",
+      "note": "get_group is past line 500 in typer/main.py.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "long-sanic-registration",
+    "kind": "long-page",
+    "repo": "sanic-org/sanic",
+    "commit": "5ffc7b3710838eaf016d2f9612a86a08626915e5",
+    "license": "MIT",
+    "path": "data/repos/sanic-org__sanic",
+    "objective": "In sanic/app.py, find send_registration_email and quote its async def line.",
+    "gold": {
+      "paths": [
+        "sanic/app.py"
+      ],
+      "symbol": "send_registration_email",
+      "must_read": true,
+      "quote": "async def send_registration_email(**context):",
+      "note": "That example is past line 500 in sanic/app.py.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "long-polynomial-floor",
+    "kind": "long-page",
+    "repo": "keon/algorithms",
+    "commit": "bd1d152f9ec7331c69be662831610b003b10fc7a",
+    "license": "MIT",
+    "path": "data/repos/keon__algorithms",
+    "objective": "In algorithms/math/polynomial.py, quote the docstring line about floor division for polynomials.",
+    "gold": {
+      "paths": [
+        "algorithms/math/polynomial.py"
+      ],
+      "must_read": true,
+      "quote": "Floor division (same as true division for polynomials).",
+      "note": "That docstring is past line 500.",
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "distractor-gooey-application",
+    "kind": "distractor",
+    "repo": "chriskiehl/Gooey",
+    "commit": "c4994c12f1826034525a5e5cca184e16c0092ff1",
+    "license": "MIT",
+    "path": "data/repos/chriskiehl__Gooey",
+    "objective": "Find the class GooeyApplication. Name the file that defines it. Do not substitute the similarly named application.py under gooey/gui/application/.",
+    "gold": {
+      "paths": [
+        "gooey/gui/containers/application.py"
+      ],
+      "symbol": "GooeyApplication",
+      "distractor": "gooey/gui/application/application.py",
+      "note": "GooeyApplication is in gooey/gui/containers/application.py, not gooey/gui/application/application.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "distractor-sanic-app",
+    "kind": "distractor",
+    "repo": "sanic-org/sanic",
+    "commit": "5ffc7b3710838eaf016d2f9612a86a08626915e5",
+    "license": "MIT",
+    "path": "data/repos/sanic-org__sanic",
+    "objective": "Find the web application class Sanic. Name sanic/app.py. Do not answer with the CLI file sanic/cli/app.py.",
+    "gold": {
+      "paths": [
+        "sanic/app.py"
+      ],
+      "symbol": "Sanic",
+      "distractor": "sanic/cli/app.py",
+      "note": "class Sanic is in sanic/app.py, not sanic/cli/app.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "distractor-typer-core",
+    "kind": "distractor",
+    "repo": "fastapi/typer",
+    "commit": "a80f6e5ecd74f32b983cca336a2f3cba98d9853a",
+    "license": "MIT",
+    "path": "data/repos/fastapi__typer",
+    "objective": "Find _typer_param_setup_autocompletion_compat. Name typer/core.py. Do not answer with typer/_click/core.py.",
+    "gold": {
+      "paths": [
+        "typer/core.py"
+      ],
+      "symbol": "_typer_param_setup_autocompletion_compat",
+      "distractor": "typer/_click/core.py",
+      "note": "The helper is in typer/core.py, not typer/_click/core.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "distractor-sqlmodel-session",
+    "kind": "distractor",
+    "repo": "fastapi/sqlmodel",
+    "commit": "c1db37d4aa73bc0879d545f6393c7f83f614aeb6",
+    "license": "MIT",
+    "path": "data/repos/fastapi__sqlmodel",
+    "objective": "Find the synchronous class Session. Name sqlmodel/orm/session.py. Do not answer with the asyncio session file.",
+    "gold": {
+      "paths": [
+        "sqlmodel/orm/session.py"
+      ],
+      "symbol": "Session",
+      "distractor": "sqlmodel/ext/asyncio/session.py",
+      "note": "Session is in sqlmodel/orm/session.py, not sqlmodel/ext/asyncio/session.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  },
+  {
+    "id": "distractor-levjepa",
+    "kind": "distractor",
+    "repo": "lucidrains/vit-pytorch",
+    "commit": "c3622978f68a114b5ae45c4322b54391b24f5c3d",
+    "license": "MIT",
+    "path": "data/repos/lucidrains__vit-pytorch",
+    "objective": "Find the class LeVJEPA. Name vit_pytorch/levjepa.py. Do not answer with vit_pytorch/levjepa_nd.py.",
+    "gold": {
+      "paths": [
+        "vit_pytorch/levjepa.py"
+      ],
+      "symbol": "LeVJEPA",
+      "distractor": "vit_pytorch/levjepa_nd.py",
+      "note": "class LeVJEPA is in vit_pytorch/levjepa.py, not levjepa_nd.py.",
+      "must_read": false,
+      "expect_absent": false
+    }
+  }
+]

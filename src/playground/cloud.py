@@ -8,6 +8,7 @@ stripped, the same way ``served_model_name`` works in UCE routing.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -15,9 +16,14 @@ import httpx
 
 from playground.config import Settings
 
+# A 500 is retried on that same completion. Later attempts wait this long.
+_SERVER_ERROR_DELAYS = (2.0, 8.0, 20.0)
+
 
 class CloudError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 def served_model_name(model: str) -> str:
@@ -72,20 +78,21 @@ class MidiumCloud:
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
-        response = await self._client.post(self._chat_path(), json=body)
+        response = await self._post_with_server_retries(body)
         if response.status_code >= 400:
-            raise CloudError(f"Midium Cloud {response.status_code}: {response.text[:500]}")
-        payload = response.json()
-        try:
-            message = payload["choices"][0]["message"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise CloudError(f"Midium Cloud returned no assistant message: {payload!r}") from exc
-        if not isinstance(message, dict):
-            raise CloudError("Midium Cloud assistant message was not an object")
-        message["_raw"] = payload
-        usage = payload.get("usage") or {}
-        message["_usage"] = usage
-        return message
+            raise CloudError(
+                f"Midium Cloud {response.status_code}: {response.text[:500]}",
+                status=response.status_code,
+            )
+        return _assistant_message(response.json(), "Midium Cloud")
+
+    async def _post_with_server_retries(self, body: dict[str, Any]) -> httpx.Response:
+        return await post_retrying_500(
+            self._client,
+            self._chat_path(),
+            body,
+            label=f"Midium Cloud on {self.model}",
+        )
 
 
 class OpenRouter:
@@ -102,6 +109,29 @@ class OpenRouter:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    async def complete(self, messages: list[dict], tools: list[dict] | None) -> dict:
+        """Tool-calling completion used when this model is the reader teacher."""
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.2,
+        }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+        response = await post_retrying_500(
+            self._client,
+            "chat/completions",
+            body,
+            label="OpenRouter",
+        )
+        if response.status_code >= 400:
+            raise CloudError(
+                f"OpenRouter {response.status_code}: {response.text[:500]}",
+                status=response.status_code,
+            )
+        return _assistant_message(response.json(), "OpenRouter")
 
     async def complete_text(self, system: str, user: str) -> str:
         body = {
@@ -121,6 +151,39 @@ class OpenRouter:
         except (KeyError, IndexError, TypeError) as exc:
             raise CloudError(f"OpenRouter returned no content: {payload!r}") from exc
         return content or ""
+
+
+async def post_retrying_500(
+    client: httpx.AsyncClient,
+    path: str,
+    body: dict[str, Any],
+    *,
+    label: str,
+) -> httpx.Response:
+    """Retry an HTTP 500 on the same completion. Other statuses return immediately."""
+    delays = _SERVER_ERROR_DELAYS
+    response: httpx.Response | None = None
+    for attempt, delay in enumerate((0.0, *delays), start=1):
+        if delay:
+            print(f"  {label} 500, retry {attempt - 1} in {delay:.0f}s", flush=True)
+            await asyncio.sleep(delay)
+        response = await client.post(path, json=body)
+        if response.status_code != 500 or attempt > len(delays):
+            return response
+    assert response is not None
+    return response
+
+
+def _assistant_message(payload: dict, label: str) -> dict:
+    try:
+        message = payload["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise CloudError(f"{label} returned no assistant message: {payload!r}") from exc
+    if not isinstance(message, dict):
+        raise CloudError(f"{label} assistant message was not an object")
+    message["_raw"] = payload
+    message["_usage"] = payload.get("usage") or {}
+    return message
 
 
 def parse_json_object(text: str) -> dict:
