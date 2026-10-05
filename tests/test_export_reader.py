@@ -86,6 +86,24 @@ def test_dwq_settings_are_the_high_quality_recipe():
     assert "mlx_lm.dwq" not in inspect.getsource(export_reader)
 
 
+def test_freeze_skips_a_module_without_no_grad():
+    from playground.dwq_vlm import freeze_module
+
+    class _Broken:
+        pass
+
+    class _Ok:
+        def __init__(self):
+            self._parameters = {"weight": 1}
+            self._no_grad = set()
+
+    broken = _Broken()
+    freeze_module(broken)
+    ok = _Ok()
+    freeze_module(ok)
+    assert ok._no_grad == {"weight"}
+
+
 def test_teacher_target_accepts_the_split_keyword():
     from playground.dwq_vlm import teacher_target
 

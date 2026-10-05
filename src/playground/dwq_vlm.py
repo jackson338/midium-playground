@@ -58,8 +58,7 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
     print(f"Loading DWQ student {teacher_dir}", flush=True)
     student_vlm, _processor = load(str(teacher_dir))
     _quantize_all_linears(nn, student_vlm)
-    if hasattr(student_vlm, "freeze"):
-        student_vlm.freeze()
+    safe_freeze(student_vlm)
     teacher = _TextLogits(teacher_vlm)
     student = _TextLogits(student_vlm)
     tokenizer = getattr(processor, "tokenizer", processor)
@@ -95,6 +94,20 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
     accept_distillation(initial, final)
     _save_quantized(student_vlm, teacher_dir, dest, initial, final)
     print(f"DWQ 4-bit saved to {dest} (loss {initial:.4f} -> {final:.4f})", flush=True)
+
+
+def freeze_module(module) -> None:
+    """Mark one module's parameters frozen. Skip modules MLX cannot freeze."""
+    try:
+        parameters = object.__getattribute__(module, "_parameters")
+        no_grad = object.__getattribute__(module, "_no_grad")
+    except AttributeError:
+        return
+    no_grad.update(parameters.keys())
+
+
+def safe_freeze(model) -> None:
+    model.apply_to_modules(lambda _prefix, module: freeze_module(module))
 
 
 def teacher_target(teacher):
