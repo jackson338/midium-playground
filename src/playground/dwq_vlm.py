@@ -58,6 +58,8 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
     print(f"Loading DWQ student {teacher_dir}", flush=True)
     student_vlm, _processor = load(str(teacher_dir))
     _quantize_all_linears(nn, student_vlm)
+    if hasattr(student_vlm, "freeze"):
+        student_vlm.freeze()
     teacher = _TextLogits(teacher_vlm)
     student = _TextLogits(student_vlm)
     tokenizer = getattr(processor, "tokenizer", processor)
@@ -76,7 +78,7 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
 
         dwq_quantize(
             student,
-            lambda batch, _idx, _split: teacher(batch),
+            teacher_target(teacher),
             optimizers.Adam(learning_rate=DWQ_LEARNING_RATE, bias_correction=True),
             train_data,
             valid_data,
@@ -93,6 +95,16 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
     accept_distillation(initial, final)
     _save_quantized(student_vlm, teacher_dir, dest, initial, final)
     print(f"DWQ 4-bit saved to {dest} (loss {initial:.4f} -> {final:.4f})", flush=True)
+
+
+def teacher_target(teacher):
+    """mlx calls ``target_fn(batch, index, split=...)``."""
+
+    def target_fn(batch, index, split):
+        del index, split
+        return teacher(batch)
+
+    return target_fn
 
 
 def _quantize_all_linears(nn, model) -> None:

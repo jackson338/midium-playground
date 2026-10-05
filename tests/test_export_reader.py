@@ -86,6 +86,13 @@ def test_dwq_settings_are_the_high_quality_recipe():
     assert "mlx_lm.dwq" not in inspect.getsource(export_reader)
 
 
+def test_teacher_target_accepts_the_split_keyword():
+    from playground.dwq_vlm import teacher_target
+
+    seen = teacher_target(lambda batch: batch)("tokens", 0, split="valid")
+    assert seen == "tokens"
+
+
 def test_worse_validation_loss_refuses_the_benchmark():
     from playground.dwq_vlm import accept_distillation, validation_losses
 
