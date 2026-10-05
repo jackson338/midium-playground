@@ -1,7 +1,7 @@
 """Fuse the 300-step reader LoRA, DWQ-quantize it, and score the 4-bit model.
 
-The Studio already has the base weights. This command does not download them
-again when that commit is in the local Hugging Face cache.
+The Studio already has the base weights. This command uses that local snapshot
+and does not download Gemma again.
 """
 
 from __future__ import annotations
@@ -37,16 +37,43 @@ def check_adapter(path: Path) -> None:
         raise SystemExit(f"Adapter commit is {commit}. Expected {BASE_COMMIT}.")
 
 
-def resolve_cached_base() -> str:
-    """Return the local snapshot. Refuse to download when the commit is missing."""
-    from huggingface_hub import snapshot_download
+def local_gemma_snapshot(cache: Path) -> str:
+    """Use the downloaded Gemma snapshot. Do not contact Hugging Face."""
+    repo = cache / "models--unsloth--gemma-4-E4B-it"
+    snapshots = repo / "snapshots"
+    pinned = snapshots / BASE_COMMIT
+    if (pinned / "config.json").is_file():
+        return str(pinned)
+    main_ref = repo / "refs" / "main"
+    if main_ref.is_file():
+        name = main_ref.read_text(encoding="utf-8").strip()
+        pointed = snapshots / name
+        if (pointed / "config.json").is_file():
+            print(
+                f"Using cached {BASE_MODEL} snapshot {name}. "
+                f"Commit {BASE_COMMIT} is not a separate local snapshot.",
+                flush=True,
+            )
+            return str(pointed)
+    found = []
+    if snapshots.is_dir():
+        found = [path for path in snapshots.iterdir() if (path / "config.json").is_file()]
+    if len(found) == 1:
+        print(
+            f"Using cached {BASE_MODEL} snapshot {found[0].name}.",
+            flush=True,
+        )
+        return str(found[0])
+    raise SystemExit(
+        f"{BASE_MODEL} is not in the local Hugging Face cache at {repo}."
+    )
 
-    try:
-        return snapshot_download(BASE_MODEL, revision=BASE_COMMIT, local_files_only=True)
-    except Exception as exc:
-        raise SystemExit(
-            f"{BASE_MODEL} commit {BASE_COMMIT} is not in the local Hugging Face cache."
-        ) from exc
+
+def resolve_cached_base() -> str:
+    """Return the local snapshot. Refuse to download when the model is missing."""
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    return local_gemma_snapshot(Path(HF_HUB_CACHE))
 
 
 def fuse_command(base: str, adapter: Path, dest: Path) -> list[str]:

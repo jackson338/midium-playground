@@ -28,6 +28,25 @@ def _adapter(tmp_path, base: str = BASE_MODEL, commit: str = BASE_COMMIT):
     return tmp_path
 
 
+def test_cached_main_snapshot_is_used_when_the_commit_dir_is_absent(tmp_path):
+    from playground.export_reader import local_gemma_snapshot
+
+    repo = tmp_path / "models--unsloth--gemma-4-E4B-it"
+    snapshot = repo / "snapshots" / "abc123"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    (repo / "refs").mkdir()
+    (repo / "refs" / "main").write_text("abc123\n", encoding="utf-8")
+    assert local_gemma_snapshot(tmp_path) == str(snapshot)
+
+
+def test_missing_cache_is_refused(tmp_path):
+    from playground.export_reader import local_gemma_snapshot
+
+    with pytest.raises(SystemExit, match="not in the local Hugging Face cache"):
+        local_gemma_snapshot(tmp_path)
+
+
 def test_missing_adapter_is_refused(tmp_path):
     with pytest.raises(SystemExit, match="not found"):
         check_adapter(tmp_path / "missing")
