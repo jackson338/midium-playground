@@ -68,8 +68,8 @@ async def run_subswe(
     adapter: Path | None = None,
 ) -> Path:
     route, concurrency = model_spec(model)
-    if run not in {1, 2}:
-        raise SystemExit("SubSWE run must be 1 or 2.")
+    if run not in {1, 2, 3}:
+        raise SystemExit("SubSWE run must be 1, 2, or 3.")
     tasks = load_subswe_tasks()
     dest = trace_path(model, run)
     done = {row.get("id") for row in read_jsonl(dest)}
@@ -189,7 +189,7 @@ def _print_report(payload: dict) -> None:
                 continue
             if flags.get("passed"):
                 continue
-            failed = [name for name, value in flags.items() if value is False and name != "passed"]
+            failed = [name for name, value in flags.items() if value is False and name not in {"passed", "invalid"}]
             print(f"  fail {item['id']}: {', '.join(failed)}", flush=True)
     for label, block in payload["published"].items():
         if not block.get("published"):

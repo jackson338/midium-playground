@@ -13,7 +13,11 @@ import threading
 from pathlib import Path
 
 from playground.config import ROOT
-from playground.gemma_turns import TOOL_TRAIN_EXAMPLES, build_checked_tool_train_set
+from playground.gemma_turns import (
+    TOOL_TRAIN_EXAMPLES,
+    build_checked_tool_train_set,
+    build_shuffled_tool_train_set,
+)
 from playground.harness.tools import openai_tools
 from playground.probe import (
     MEMORY_CEILING_BYTES,
@@ -31,7 +35,8 @@ MAX_BATCH_SIZE = 1
 CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-lora"
 TOOLS_CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-tools"
 NEXT_CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-tools-200"
-NEXT_SKIP = 100
+THIRD_CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-tools-300"
+TRAIN_ORDER_PATH = ROOT / "data" / "checkpoints" / "train-order.json"
 
 
 def validate_train_args(context: int, batch_size: int) -> None:
@@ -109,6 +114,8 @@ def run_train_cli(
     *,
     examples: int = TOOL_TRAIN_EXAMPLES,
     skip: int = 0,
+    shuffle_after: int | None = None,
+    order_path: Path | None = None,
     checkpoint: Path | None = None,
     resume: Path | None = None,
 ) -> None:
@@ -122,13 +129,25 @@ def run_train_cli(
     rows = load_teacher_rows()
     tokenizer = _load_chat_tokenizer()
     render, count_tokens = chat_template_renderer(tokenizer)
-    packed, skipped = build_checked_tool_train_set(
-        rows, context, count_tokens, render, n=examples, skip=skip
-    )
+    if shuffle_after is None:
+        packed, skipped = build_checked_tool_train_set(
+            rows, context, count_tokens, render, n=examples, skip=skip
+        )
+    else:
+        packed, skipped = build_shuffled_tool_train_set(
+            rows,
+            context,
+            count_tokens,
+            render,
+            n=examples,
+            used=shuffle_after,
+            order_path=order_path,
+        )
     tokens = sum(item["tokens"] for item in packed)
+    selection = f"shuffle_after={shuffle_after}" if shuffle_after is not None else f"skip={skip}"
     print(
         f"Tool-call train set: {len(packed)} episodes, {tokens} tokens, skipped {skipped}, "
-        f"skip={skip}, batch_size={batch_size}",
+        f"{selection}, batch_size={batch_size}",
         flush=True,
     )
     _require_unsloth()

@@ -136,6 +136,70 @@ def test_old_adapter_directory_is_refused():
         resolve_tools_checkpoint(CHECKPOINT_DIR)
 
 
+def test_shuffle_keeps_a_stable_remainder_after_the_used_rows(tmp_path):
+    import json
+
+    from playground.gemma_turns import build_shuffled_tool_train_set, shuffled_remainder
+
+    ids = [f"episode-{index}" for index in range(8)]
+    rest = shuffled_remainder(ids, used=3)
+    assert sorted(rest) == ids[3:]
+    assert rest != ids[3:]
+    assert shuffled_remainder(ids, used=3) == rest
+
+    rows = []
+    for episode_id in ids:
+        row = _row("train", "p", commission=episode_id)
+        row["id"] = episode_id
+        rows.append(row)
+    order = tmp_path / "train-order.json"
+    packed, _skipped = build_shuffled_tool_train_set(
+        rows, 100000, lambda text: len(text), _render, n=2, used=3, order_path=order
+    )
+    saved = json.loads(order.read_text(encoding="utf-8"))
+    assert saved["used"] == 3
+    assert saved["ids"] == rest
+    assert saved["ids"][0] in packed[0]["text"]
+    assert "episode-0" not in packed[0]["text"]
+    again, _skipped = build_shuffled_tool_train_set(
+        rows, 100000, lambda text: len(text), _render, n=2, used=3, order_path=order
+    )
+    assert again[0]["text"] == packed[0]["text"]
+
+
+def test_fail_line_omits_a_false_invalid_flag(capsys):
+    from playground.compare_lora import print_scores
+
+    print_scores(
+        [
+            {
+                "model": "Gemma 4 E4B LoRA",
+                "run": 3,
+                "pass_rate": 0.75,
+                "passed": 30,
+                "attempted": 40,
+                "call_count": 237,
+                "by_kind": {"multi-file": {"passed": 5, "attempted": 6}},
+                "tasks": [
+                    {
+                        "id": "multi-sqlmodel-model-session",
+                        "error": None,
+                        "deterministic": {
+                            "passed": False,
+                            "invalid": False,
+                            "named_paths": False,
+                            "valid_tools": True,
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "fail multi-sqlmodel-model-session: named_paths" in out
+    assert "invalid" not in out
+
+
 def test_skip_takes_the_following_fitting_rows():
     rows = [_row("holdout", "H", commission="holdout question")]
     rows.extend(_row("train", "p", commission=f"question {index}") for index in range(8))

@@ -8,6 +8,7 @@ including a tool result the model wrote itself.
 from __future__ import annotations
 
 import json
+import random
 import re
 
 from playground.harness.loop import split_thinking
@@ -25,6 +26,8 @@ _TOOL_RESPONSE = re.compile(
 )
 _STRING = '<|"|>'
 TOOL_TRAIN_EXAMPLES = 100
+SHUFFLE_SEED = 3407
+USED_TRAIN_ROWS = 200
 
 
 def episode_messages(episode: dict, page_texts: list[str], skill: str | None = None) -> list[dict]:
@@ -120,6 +123,74 @@ def build_tool_train_set(
         raise SystemExit("No train episodes fit under the 32k cap.")
     if skip and len(packed) < n:
         raise SystemExit(f"Needed {n} episodes after skipping {skip}, found {len(packed)}.")
+    return packed, skipped
+
+
+def shuffled_remainder(ids: list[str], used: int = USED_TRAIN_ROWS, seed: int = SHUFFLE_SEED) -> list[str]:
+    """Shuffle the ids after the ones already trained. The used prefix stays out."""
+    if used < 0 or len(ids) <= used:
+        raise SystemExit(f"Need more than {used} fitting train rows to shuffle the rest.")
+    rest = list(ids[used:])
+    random.Random(seed).shuffle(rest)
+    return rest
+
+
+def load_or_write_train_order(path, remainder: list[str], *, used: int = USED_TRAIN_ROWS) -> list[str]:
+    """Keep one shuffle on disk so the next batch can take the following ids."""
+    if path.is_file():
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        ids = list(saved.get("ids") or [])
+        if ids != remainder and set(ids) != set(remainder):
+            raise SystemExit(f"Train order {path} does not match the remaining episodes.")
+        return ids
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"seed": SHUFFLE_SEED, "used": used, "ids": remainder}
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return remainder
+
+
+def build_shuffled_tool_train_set(
+    rows: list[dict],
+    limit: int,
+    count_tokens,
+    render,
+    n: int = TOOL_TRAIN_EXAMPLES,
+    used: int = USED_TRAIN_ROWS,
+    order_path=None,
+):
+    """First ``n`` ids of the shuffled remainder. The teacher jsonl is not rewritten."""
+    fitting: list[tuple[str, dict]] = []
+    skipped = 0
+    seen: set[str] = set()
+    for row in rows:
+        if row.get("split") != "train":
+            skipped += 1
+            continue
+        item = pack_tool_example(row, limit, count_tokens, render)
+        if item is None or item["tokens"] > limit:
+            skipped += 1
+            continue
+        episode_id = row.get("id")
+        if not episode_id or episode_id in seen:
+            raise SystemExit("Each fitting train row needs a unique id.")
+        seen.add(episode_id)
+        fitting.append((episode_id, item))
+    remainder = shuffled_remainder([episode_id for episode_id, _item in fitting], used)
+    if order_path is not None:
+        remainder = load_or_write_train_order(order_path, remainder, used=used)
+    if len(remainder) < n:
+        raise SystemExit(f"Needed {n} shuffled episodes, found {len(remainder)}.")
+    by_id = {episode_id: item for episode_id, item in fitting}
+    chosen = remainder[:n]
+    missing = [episode_id for episode_id in chosen if episode_id not in by_id]
+    if missing:
+        raise SystemExit(f"Shuffled ids are not in the remaining train rows: {missing[:3]}")
+    packed = [by_id[episode_id] for episode_id in chosen]
+    require_tool_call_loss(packed[0]["text"])
+    print(
+        "Loss check passed on the first shuffled example: it contains <|tool_call>call:.",
+        flush=True,
+    )
     return packed, skipped
 
 

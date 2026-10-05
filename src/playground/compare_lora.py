@@ -9,6 +9,7 @@ import asyncio
 from pathlib import Path
 
 from playground.config import ROOT, settings
+from playground.gemma_turns import USED_TRAIN_ROWS
 from playground.subswe import (
     F16_MODEL,
     LORA_MODEL,
@@ -17,7 +18,13 @@ from playground.subswe import (
     run_subswe,
     trace_path,
 )
-from playground.train import NEXT_CHECKPOINT_DIR, NEXT_SKIP, TOOLS_CHECKPOINT_DIR, run_train_cli
+from playground.train import (
+    NEXT_CHECKPOINT_DIR,
+    THIRD_CHECKPOINT_DIR,
+    TOOLS_CHECKPOINT_DIR,
+    TRAIN_ORDER_PATH,
+    run_train_cli,
+)
 
 
 def repos_present(tasks: list[dict] | None = None) -> bool:
@@ -53,7 +60,7 @@ def print_scores(rows: list[dict]) -> None:
                 continue
             if flags.get("passed"):
                 continue
-            failed = [name for name, value in flags.items() if value is False and name != "passed"]
+            failed = [name for name, value in flags.items() if value is False and name not in {"passed", "invalid"}]
             print(f"  fail {item['id']}: {', '.join(failed)}", flush=True)
 
 
@@ -93,26 +100,35 @@ def drop_lora_run2(path: Path | None = None) -> None:
         dest.unlink()
 
 
+def drop_lora_run(run: int, path: Path | None = None) -> None:
+    """Replace one LoRA score file. Earlier runs stay."""
+    dest = path or trace_path(LORA_MODEL, run)
+    if dest.is_file():
+        dest.unlink()
+
+
 def run_train_next() -> None:
-    """Continue the 100-step adapter on the next 100 episodes, then score it."""
-    if not (TOOLS_CHECKPOINT_DIR / "adapter_config.json").is_file():
-        raise SystemExit(f"100-step adapter not found: {TOOLS_CHECKPOINT_DIR}")
+    """Continue the 200-step adapter on 100 shuffled episodes, then score it."""
+    if not (NEXT_CHECKPOINT_DIR / "adapter_config.json").is_file():
+        raise SystemExit(f"200-step adapter not found: {NEXT_CHECKPOINT_DIR}")
     tasks = load_subswe_tasks()
     require_saved_trace(F16_MODEL, 1)
     require_saved_trace(LORA_MODEL, 1)
+    require_saved_trace(LORA_MODEL, 2)
     if not repos_present(tasks):
         fetch_subswe_repos(tasks)
     run_train_cli(
         32768,
         1,
-        examples=NEXT_SKIP,
-        skip=NEXT_SKIP,
-        checkpoint=NEXT_CHECKPOINT_DIR,
-        resume=TOOLS_CHECKPOINT_DIR,
+        examples=100,
+        shuffle_after=USED_TRAIN_ROWS,
+        order_path=TRAIN_ORDER_PATH,
+        checkpoint=THIRD_CHECKPOINT_DIR,
+        resume=NEXT_CHECKPOINT_DIR,
     )
-    drop_lora_run2()
+    drop_lora_run(3)
     cfg = settings()
-    asyncio.run(run_subswe(cfg, LORA_MODEL, 2, grade=False, adapter=NEXT_CHECKPOINT_DIR))
+    asyncio.run(run_subswe(cfg, LORA_MODEL, 3, grade=False, adapter=THIRD_CHECKPOINT_DIR))
     from playground.subswe import _rescore_file
 
     task_map = {task["id"]: task for task in tasks}
@@ -121,5 +137,6 @@ def run_train_next() -> None:
             _rescore_file(trace_path(F16_MODEL, 1), task_map, F16_MODEL, 1),
             _rescore_file(trace_path(LORA_MODEL, 1), task_map, LORA_MODEL, 1),
             _rescore_file(trace_path(LORA_MODEL, 2), task_map, LORA_MODEL, 2),
+            _rescore_file(trace_path(LORA_MODEL, 3), task_map, LORA_MODEL, 3),
         ]
     )
