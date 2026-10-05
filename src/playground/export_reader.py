@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 from playground.config import ROOT, settings
@@ -96,20 +94,6 @@ def fuse_bf16(adapter: Path, dest: Path) -> None:
         save(str(dest), tokenizer)
 
 
-def dwq_command(teacher: Path, dest: Path) -> list[str]:
-    return [
-        sys.executable,
-        "-m",
-        "mlx_lm.quant.dwq",
-        "--model",
-        str(teacher),
-        "--mlx-path",
-        str(dest),
-        "--bits",
-        "4",
-    ]
-
-
 def has_weights(path: Path) -> bool:
     if not (path / "config.json").is_file():
         return False
@@ -141,7 +125,6 @@ def _rooted(path: Path) -> Path:
 
 
 def run_export_reader(
-    runner=None,
     adapter: Path | None = None,
     bf16: Path | None = None,
     fourbit: Path | None = None,
@@ -159,7 +142,6 @@ def run_export_reader(
     require_saved_trace(LORA_MODEL, 3)
     if not repos_present(tasks):
         fetch_subswe_repos(tasks)
-    run = runner or _run
     steps = export_steps(bf16_dir, fourbit_dir)
     if "fuse" in steps:
         base = resolve_cached_base()
@@ -170,7 +152,9 @@ def run_export_reader(
         print(f"F16 model already at {bf16_dir}", flush=True)
     if "dwq" in steps:
         print(f"DWQ 4-bit into {fourbit_dir}", flush=True)
-        run(dwq_command(bf16_dir, fourbit_dir))
+        from playground.dwq_vlm import run_vlm_dwq
+
+        run_vlm_dwq(bf16_dir, fourbit_dir)
     else:
         print(f"4-bit model already at {fourbit_dir}", flush=True)
     dest = trace_path(READER_4BIT_MODEL, 1)
@@ -188,6 +172,3 @@ def run_export_reader(
         ]
     )
 
-
-def _run(cmd: list[str]) -> None:
-    subprocess.run(cmd, check=True)

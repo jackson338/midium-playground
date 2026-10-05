@@ -8,7 +8,6 @@ from playground.export_reader import (
     BASE_COMMIT,
     BASE_MODEL,
     check_adapter,
-    dwq_command,
 )
 import playground.export_reader as export_reader
 from playground.compare_lora import print_scores
@@ -64,14 +63,39 @@ def test_fuse_does_not_call_mlx_vlm_fuse():
     assert "mlx_vlm.fuse" not in inspect.getsource(export_reader)
 
 
-def test_dwq_uses_the_fused_f16_folder(tmp_path):
-    bf16 = tmp_path / "bf16"
-    four = tmp_path / "four"
-    dwq = dwq_command(bf16, four)
-    assert dwq[2] == "mlx_lm.quant.dwq"
-    assert "--bits" in dwq and "4" in dwq
-    assert str(bf16) in dwq
-    assert str(four) in dwq
+def test_dwq_settings_are_the_high_quality_recipe():
+    from playground.dwq_vlm import (
+        DWQ_BATCH_SIZE,
+        DWQ_BITS,
+        DWQ_GROUP_SIZE,
+        DWQ_LEARNING_RATE,
+        DWQ_MAX_SEQ_LENGTH,
+        DWQ_NUM_SAMPLES,
+        DWQ_TEMPERATURE,
+        DWQ_VALID_SAMPLES,
+    )
+
+    assert DWQ_BITS == 4
+    assert DWQ_GROUP_SIZE == 32
+    assert DWQ_NUM_SAMPLES == 2048
+    assert DWQ_VALID_SAMPLES == 32
+    assert DWQ_MAX_SEQ_LENGTH == 1025
+    assert DWQ_TEMPERATURE == 2.0
+    assert DWQ_LEARNING_RATE == 1e-5
+    assert DWQ_BATCH_SIZE == 2
+    assert "mlx_lm.dwq" not in inspect.getsource(export_reader)
+
+
+def test_worse_validation_loss_refuses_the_benchmark():
+    from playground.dwq_vlm import accept_distillation, validation_losses
+
+    initial, final = validation_losses(
+        ["Validation: it=0, loss=1.200", "Validation: it=10, loss=0.800"]
+    )
+    assert (initial, final) == (1.2, 0.8)
+    accept_distillation(initial, final)
+    with pytest.raises(SystemExit, match="worse"):
+        accept_distillation(1.2, 1.4)
 
 
 def test_finished_f16_directory_skips_the_fuse(tmp_path):
