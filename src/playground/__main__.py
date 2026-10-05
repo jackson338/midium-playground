@@ -11,6 +11,7 @@
     uv run python -m playground probe --context 16384
     uv run python -m playground train --context 32768 --batch-size 1
     uv run python -m playground compare-lora
+    uv run python -m playground train-next
 """
 
 from __future__ import annotations
@@ -86,6 +87,10 @@ def main() -> None:
         "compare-lora",
         help="Score F16 Gemma, train 100 tool-call examples, score that adapter.",
     )
+    sub.add_parser(
+        "train-next",
+        help="Train the next 100 episodes on the current adapter and score that run.",
+    )
 
     args = parser.parse_args()
     if args.cmd == "commissions":
@@ -129,6 +134,11 @@ def main() -> None:
         from playground.compare_lora import run_compare_lora
 
         run_compare_lora()
+        return
+    if args.cmd == "train-next":
+        from playground.compare_lora import run_train_next
+
+        run_train_next()
         return
 
 

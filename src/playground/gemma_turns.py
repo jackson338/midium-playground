@@ -90,10 +90,18 @@ def pack_tool_example(episode: dict, limit: int, count_tokens, render) -> dict |
     return {"text": text, "tokens": tokens, "pages_used": sum(1 for page in kept if page)}
 
 
-def build_tool_train_set(rows: list[dict], limit: int, count_tokens, render, n: int = TOOL_TRAIN_EXAMPLES):
-    """First ``n`` train rows that fit, in file order. Holdout rows are skipped."""
+def build_tool_train_set(
+    rows: list[dict],
+    limit: int,
+    count_tokens,
+    render,
+    n: int = TOOL_TRAIN_EXAMPLES,
+    skip: int = 0,
+):
+    """Train rows that fit, in file order. ``skip`` drops that many fitting rows first."""
     packed: list[dict] = []
     skipped = 0
+    passed = 0
     for row in rows:
         if len(packed) >= n:
             break
@@ -104,9 +112,14 @@ def build_tool_train_set(rows: list[dict], limit: int, count_tokens, render, n: 
         if item is None or item["tokens"] > limit:
             skipped += 1
             continue
+        if passed < skip:
+            passed += 1
+            continue
         packed.append(item)
     if not packed:
         raise SystemExit("No train episodes fit under the 32k cap.")
+    if skip and len(packed) < n:
+        raise SystemExit(f"Needed {n} episodes after skipping {skip}, found {len(packed)}.")
     return packed, skipped
 
 
@@ -126,10 +139,15 @@ def require_tool_call_loss(text: str) -> None:
 
 
 def build_checked_tool_train_set(
-    rows: list[dict], limit: int, count_tokens, render, n: int = TOOL_TRAIN_EXAMPLES
+    rows: list[dict],
+    limit: int,
+    count_tokens,
+    render,
+    n: int = TOOL_TRAIN_EXAMPLES,
+    skip: int = 0,
 ):
-    """Render one example, require Gemma tool-call tokens, then take the rest."""
-    probe, _probe_skipped = build_tool_train_set(rows, limit, count_tokens, render, n=1)
+    """Render one example of this slice, require Gemma tool-call tokens, then take the rest."""
+    probe, _probe_skipped = build_tool_train_set(rows, limit, count_tokens, render, n=1, skip=skip)
     require_tool_call_loss(probe[0]["text"])
     print(
         "Loss check passed on the first example: it contains <|tool_call>call:.",
@@ -137,7 +155,7 @@ def build_checked_tool_train_set(
     )
     if n <= 1:
         return probe, _probe_skipped
-    return build_tool_train_set(rows, limit, count_tokens, render, n=n)
+    return build_tool_train_set(rows, limit, count_tokens, render, n=n, skip=skip)
 
 
 def clip_generation(text: str) -> str:

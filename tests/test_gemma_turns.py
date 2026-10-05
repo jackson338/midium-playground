@@ -136,6 +136,38 @@ def test_old_adapter_directory_is_refused():
         resolve_tools_checkpoint(CHECKPOINT_DIR)
 
 
+def test_skip_takes_the_following_fitting_rows():
+    rows = [_row("holdout", "H", commission="holdout question")]
+    rows.extend(_row("train", "p", commission=f"question {index}") for index in range(8))
+    packed, _skipped = build_tool_train_set(rows, 100000, lambda text: len(text), _render, n=3, skip=5)
+    assert len(packed) == 3
+    assert "question 5" in packed[0]["text"]
+    assert "question 0" not in packed[0]["text"]
+    assert "question 7" in packed[2]["text"]
+    with pytest.raises(SystemExit, match="after skipping"):
+        build_tool_train_set(rows, 100000, lambda text: len(text), _render, n=5, skip=5)
+
+
+def test_continued_adapter_is_not_overwritten():
+    from playground.train import NEXT_CHECKPOINT_DIR, TOOLS_CHECKPOINT_DIR, resolve_tools_checkpoint
+
+    assert resolve_tools_checkpoint(NEXT_CHECKPOINT_DIR, TOOLS_CHECKPOINT_DIR) == NEXT_CHECKPOINT_DIR
+    with pytest.raises(SystemExit, match="continued"):
+        resolve_tools_checkpoint(TOOLS_CHECKPOINT_DIR, TOOLS_CHECKPOINT_DIR)
+
+
+def test_drop_lora_run2_leaves_run1(tmp_path):
+    from playground.compare_lora import drop_lora_run2
+
+    run1 = tmp_path / "gemma-4-e4b-lora.run1.jsonl"
+    run2 = tmp_path / "gemma-4-e4b-lora.run2.jsonl"
+    run1.write_text("keep\n", encoding="utf-8")
+    run2.write_text("replace\n", encoding="utf-8")
+    drop_lora_run2(run2)
+    assert run1.is_file()
+    assert not run2.exists()
+
+
 def test_overlong_skeleton_is_skipped():
     huge = _row("train", "PAGE", commission="Q" * 20000)
     with pytest.raises(SystemExit):

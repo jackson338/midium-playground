@@ -30,6 +30,8 @@ TRAIN_CONTEXT = 32768
 MAX_BATCH_SIZE = 1
 CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-lora"
 TOOLS_CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-tools"
+NEXT_CHECKPOINT_DIR = ROOT / "data" / "checkpoints" / "e4b-32k-tools-200"
+NEXT_SKIP = 100
 
 
 def validate_train_args(context: int, batch_size: int) -> None:
@@ -62,14 +64,16 @@ def build_train_set(rows: list[dict], limit: int, count_tokens: CountTokens) -> 
     return packed, skipped
 
 
-def resolve_tools_checkpoint(checkpoint: Path | None) -> Path:
-    """The new adapter is e4b-32k-tools. Never overwrite e4b-32k-lora."""
+def resolve_tools_checkpoint(checkpoint: Path | None, resume: Path | None = None) -> Path:
+    """The new adapter is e4b-32k-tools. Never overwrite e4b-32k-lora or the adapter being continued."""
     dest = checkpoint or TOOLS_CHECKPOINT_DIR
     if dest.resolve() == CHECKPOINT_DIR.resolve():
         raise SystemExit(
             "Refusing to write over data/checkpoints/e4b-32k-lora. "
             "The tool-call adapter goes to data/checkpoints/e4b-32k-tools."
         )
+    if resume is not None and dest.resolve() == Path(resume).resolve():
+        raise SystemExit(f"Refusing to overwrite the adapter being continued: {resume}")
     return dest
 
 
@@ -104,21 +108,27 @@ def run_train_cli(
     batch_size: int,
     *,
     examples: int = TOOL_TRAIN_EXAMPLES,
+    skip: int = 0,
     checkpoint: Path | None = None,
+    resume: Path | None = None,
 ) -> None:
     """Train the tool-call LoRA. This does not resume data/checkpoints/e4b-32k-lora."""
     validate_train_args(context, batch_size)
     from playground.probe import _require_unsloth
 
-    dest = resolve_tools_checkpoint(checkpoint)
+    if resume is not None and not (resume / "adapter_config.json").is_file():
+        raise SystemExit(f"Adapter to continue was not found: {resume}")
+    dest = resolve_tools_checkpoint(checkpoint, resume)
     rows = load_teacher_rows()
     tokenizer = _load_chat_tokenizer()
     render, count_tokens = chat_template_renderer(tokenizer)
-    packed, skipped = build_checked_tool_train_set(rows, context, count_tokens, render, n=examples)
+    packed, skipped = build_checked_tool_train_set(
+        rows, context, count_tokens, render, n=examples, skip=skip
+    )
     tokens = sum(item["tokens"] for item in packed)
     print(
         f"Tool-call train set: {len(packed)} episodes, {tokens} tokens, skipped {skipped}, "
-        f"batch_size={batch_size}",
+        f"skip={skip}, batch_size={batch_size}",
         flush=True,
     )
     _require_unsloth()
@@ -142,7 +152,7 @@ def run_train_cli(
     watcher = threading.Thread(target=watch, daemon=True)
     watcher.start()
     try:
-        _unsloth_train([item["text"] for item in packed], context, batch_size, dest)
+        _unsloth_train([item["text"] for item in packed], context, batch_size, dest, resume)
     finally:
         stop.set()
         after = phys_footprint()
@@ -168,16 +178,7 @@ def _load_chat_tokenizer():
     return AutoTokenizer.from_pretrained(MODEL_NAME)
 
 
-def _unsloth_train(texts: list[str], max_seq_length: int, batch_size: int, dest: Path) -> None:
-    from unsloth import FastModel
-    from transformers import TrainingArguments
-
-    model, tokenizer = FastModel.from_pretrained(
-        model_name=MODEL_NAME,
-        max_seq_length=max_seq_length,
-        load_in_4bit=False,
-        full_finetuning=False,
-    )
+def _fresh_lora(FastModel, model):
     lora = dict(
         finetune_vision_layers=False,
         finetune_language_layers=True,
@@ -190,9 +191,30 @@ def _unsloth_train(texts: list[str], max_seq_length: int, batch_size: int, dest:
         random_state=3407,
     )
     try:
-        model = FastModel.get_peft_model(model, finetune_audio_layers=False, **lora)
+        return FastModel.get_peft_model(model, finetune_audio_layers=False, **lora)
     except TypeError:
-        model = FastModel.get_peft_model(model, **lora)
+        return FastModel.get_peft_model(model, **lora)
+
+
+def _unsloth_train(
+    texts: list[str], max_seq_length: int, batch_size: int, dest: Path, resume: Path | None = None
+) -> None:
+    from unsloth import FastModel
+    from transformers import TrainingArguments
+
+    # An adapter directory already contains the LoRA. Loading it continues those
+    # weights. get_peft_model on top of that would start a second adapter.
+    source = str(resume) if resume is not None else MODEL_NAME
+    if resume is not None:
+        print(f"Continuing adapter {resume}", flush=True)
+    model, tokenizer = FastModel.from_pretrained(
+        model_name=source,
+        max_seq_length=max_seq_length,
+        load_in_4bit=False,
+        full_finetuning=False,
+    )
+    if resume is None:
+        model = _fresh_lora(FastModel, model)
     from trl import SFTTrainer
 
     args = TrainingArguments(
