@@ -24,6 +24,7 @@ DWQ_MAX_SEQ_LENGTH = 512
 DWQ_TEMPERATURE = 2.0
 DWQ_LEARNING_RATE = 1e-5
 DWQ_BATCH_SIZE = 1
+DWQ_SEED = 123
 DWQ_DATASET = "allenai/tulu-3-sft-mixture"
 
 
@@ -54,7 +55,11 @@ def targets_ready(path: Path) -> bool:
     if not marker.is_file():
         return False
     saved = json.loads(marker.read_text(encoding="utf-8"))
-    if saved.get("batch_size") != DWQ_BATCH_SIZE or saved.get("max_seq_length") != DWQ_MAX_SEQ_LENGTH:
+    if (
+        saved.get("batch_size") != DWQ_BATCH_SIZE
+        or saved.get("max_seq_length") != DWQ_MAX_SEQ_LENGTH
+        or saved.get("seed") != DWQ_SEED
+    ):
         return False
     return any((path / "train").glob("*.safetensors")) and any((path / "valid").glob("*.safetensors"))
 
@@ -90,10 +95,11 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
 
         tqdm.write = _write
         try:
-            from mlx_lm.quant.dwq import dwq_quantize
+            import mlx_lm.quant.dwq as dwq_mod
 
+            _guard_trainable_count(dwq_mod)
             _checkpoint_layers(student.layers)
-            dwq_quantize(
+            dwq_mod.dwq_quantize(
                 student,
                 disk_target(target_dir),
                 optimizers.Adam(learning_rate=DWQ_LEARNING_RATE, bias_correction=True),
@@ -101,7 +107,7 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
                 valid_data,
                 batch_size=DWQ_BATCH_SIZE,
                 max_seq_length=DWQ_MAX_SEQ_LENGTH,
-                seed=123,
+                seed=DWQ_SEED,
                 temperature=DWQ_TEMPERATURE,
                 gradient_checkpoint=False,
             )
@@ -117,17 +123,17 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
 
 
 def _teacher_pass(teacher_dir: Path, target_dir: Path):
-    from mlx_vlm import load
+    from transformers import AutoTokenizer
 
+    tokenizer = AutoTokenizer.from_pretrained(str(teacher_dir))
     if targets_ready(target_dir):
         print(f"Teacher logits already at {target_dir}", flush=True)
-        from transformers import AutoTokenizer
+        return tokenizer
+    from mlx_vlm import load
 
-        return AutoTokenizer.from_pretrained(str(teacher_dir))
     print(f"Loading DWQ teacher {teacher_dir}", flush=True)
-    teacher_vlm, processor = load(str(teacher_dir))
+    teacher_vlm, _processor = load(str(teacher_dir))
     teacher = _TextLogits(teacher_vlm)
-    tokenizer = getattr(processor, "tokenizer", processor)
     train_data, valid_data = _load_calibration(tokenizer)
     from mlx_lm.quant.dwq import compute_dwq_targets
 
@@ -139,17 +145,21 @@ def _teacher_pass(teacher_dir: Path, target_dir: Path):
         valid_data,
         batch_size=DWQ_BATCH_SIZE,
         max_seq_length=DWQ_MAX_SEQ_LENGTH,
-        seed=123,
+        seed=DWQ_SEED,
     )
     (target_dir / "settings.json").write_text(
         json.dumps(
-            {"batch_size": DWQ_BATCH_SIZE, "max_seq_length": DWQ_MAX_SEQ_LENGTH},
+            {
+                "batch_size": DWQ_BATCH_SIZE,
+                "max_seq_length": DWQ_MAX_SEQ_LENGTH,
+                "seed": DWQ_SEED,
+            },
             indent=2,
         )
         + "\n",
         encoding="utf-8",
     )
-    del teacher, teacher_vlm, processor
+    del teacher, teacher_vlm, _processor
     return tokenizer
 
 
@@ -207,13 +217,39 @@ def disk_target(target_dir: Path):
 
 
 def freeze_module(module) -> None:
-    """Mark one module's parameters frozen. Skip modules MLX cannot freeze."""
+    """Freeze one module. Skip modules MLX cannot freeze.
+
+    MLX stores parameters on the module itself, not in ``_parameters``.
+    ``freeze(recurse=False)`` marks this module only, so a broken child
+    such as ``AudioRelativePositionEmbedding`` can be skipped on its own.
+    """
+    freeze = getattr(module, "freeze", None)
+    if freeze is None:
+        return
     try:
-        parameters = object.__getattribute__(module, "_parameters")
-        no_grad = object.__getattribute__(module, "_no_grad")
+        freeze(recurse=False)
     except AttributeError:
         return
-    no_grad.update(parameters.keys())
+
+
+def refuse_full_finetune(model) -> None:
+    """Stop if DWQ is about to differentiate the full weight matrices."""
+    from mlx.utils import tree_flatten
+    from mlx_lm.utils import get_total_parameters
+
+    total = get_total_parameters(model)
+    trainable = sum(v.size for _, v in tree_flatten(model.trainable_parameters()))
+    if total <= 0:
+        raise SystemExit("DWQ student has no parameters.")
+    fraction = trainable / total
+    print(
+        f"DWQ will train {fraction:.2%} of the weights ({trainable / 1e6:.1f}M/{total / 1e6:.1f}M).",
+        flush=True,
+    )
+    if fraction > 0.15:
+        raise SystemExit(
+            "DWQ is about to train full weight matrices. That does not fit in 200GB, so it was stopped."
+        )
 
 
 def safe_freeze(model) -> None:
@@ -242,9 +278,23 @@ def _quantize_all_linears(nn, model) -> None:
     nn.quantize(model, **kwargs)
 
 
+def _guard_trainable_count(dwq_mod) -> None:
+    original = dwq_mod.print_trainable_parameters
+
+    def guarded(model):
+        original(model)
+        refuse_full_finetune(model)
+
+    dwq_mod.print_trainable_parameters = guarded
+
+
 def _load_calibration(tokenizer):
+    import mlx.core as mx
+    import numpy as np
     from mlx_lm.quant.dwq import load_data
 
+    np.random.seed(DWQ_SEED)
+    mx.random.seed(DWQ_SEED)
     return load_data(
         tokenizer,
         DWQ_DATASET,

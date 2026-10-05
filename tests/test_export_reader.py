@@ -90,22 +90,24 @@ def test_freeze_skips_a_module_without_no_grad():
     from playground.dwq_vlm import freeze_module
 
     class _Broken:
-        pass
+        def freeze(self, *, recurse=True):
+            raise AttributeError("_no_grad")
 
     class _Ok:
         def __init__(self):
-            self._parameters = {"weight": 1}
-            self._no_grad = set()
+            self.recurse = None
 
-    broken = _Broken()
-    freeze_module(broken)
+        def freeze(self, *, recurse=True):
+            self.recurse = recurse
+
+    freeze_module(_Broken())
     ok = _Ok()
     freeze_module(ok)
-    assert ok._no_grad == {"weight"}
+    assert ok.recurse is False
 
 
 def test_teacher_logits_are_reused_only_when_both_splits_exist(tmp_path):
-    from playground.dwq_vlm import DWQ_BATCH_SIZE, DWQ_MAX_SEQ_LENGTH, targets_ready
+    from playground.dwq_vlm import DWQ_BATCH_SIZE, DWQ_MAX_SEQ_LENGTH, DWQ_SEED, targets_ready
 
     assert targets_ready(tmp_path) is False
     (tmp_path / "train").mkdir()
@@ -114,6 +116,17 @@ def test_teacher_logits_are_reused_only_when_both_splits_exist(tmp_path):
     (tmp_path / "valid" / "0000000000.safetensors").write_bytes(b"x")
     (tmp_path / "settings.json").write_text(
         json.dumps({"batch_size": DWQ_BATCH_SIZE, "max_seq_length": DWQ_MAX_SEQ_LENGTH}),
+        encoding="utf-8",
+    )
+    assert targets_ready(tmp_path) is False
+    (tmp_path / "settings.json").write_text(
+        json.dumps(
+            {
+                "batch_size": DWQ_BATCH_SIZE,
+                "max_seq_length": DWQ_MAX_SEQ_LENGTH,
+                "seed": DWQ_SEED,
+            }
+        ),
         encoding="utf-8",
     )
     assert targets_ready(tmp_path) is True
