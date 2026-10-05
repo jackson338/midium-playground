@@ -68,10 +68,25 @@ def test_dwq_uses_the_fused_f16_folder(tmp_path):
     bf16 = tmp_path / "bf16"
     four = tmp_path / "four"
     dwq = dwq_command(bf16, four)
-    assert dwq[2] == "mlx_lm.dwq"
+    assert dwq[2] == "mlx_lm.quant.dwq"
     assert "--bits" in dwq and "4" in dwq
     assert str(bf16) in dwq
     assert str(four) in dwq
+
+
+def test_finished_f16_directory_skips_the_fuse(tmp_path):
+    from playground.export_reader import export_steps
+
+    bf16 = tmp_path / "bf16"
+    four = tmp_path / "four"
+    bf16.mkdir()
+    (bf16 / "config.json").write_text("{}", encoding="utf-8")
+    (bf16 / "model.safetensors").write_bytes(b"weights")
+    assert export_steps(bf16, four) == ["dwq", "score"]
+    (four).mkdir()
+    (four / "config.json").write_text('{"quantization": {"bits": 4}}', encoding="utf-8")
+    (four / "model.safetensors").write_bytes(b"weights")
+    assert export_steps(bf16, four) == ["score"]
 
 
 def test_head_to_head_lists_three_pass_rates(capsys):

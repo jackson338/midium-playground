@@ -69,6 +69,7 @@ async def run_subswe(
     *,
     grade: bool,
     adapter: Path | None = None,
+    model_path: Path | None = None,
 ) -> Path:
     route, concurrency = model_spec(model)
     if run not in {1, 2, 3}:
@@ -79,7 +80,7 @@ async def run_subswe(
     pending = [task for task in tasks if task["id"] not in done]
     if grade:
         cfg.require_midium()
-    student = _student(cfg, model, route, adapter)
+    student = _student(cfg, model, route, adapter, model_path=model_path)
     grader = MidiumCloud(cfg, GRADER_MODEL, timeout=120.0) if grade else None
     sem = asyncio.Semaphore(concurrency)
 
@@ -332,14 +333,21 @@ async def _grade(grader: MidiumCloud, task: dict, report: str) -> dict:
     return {"grade": grade, "reason": str(parsed.get("reason") or "").strip()}
 
 
-def _student(cfg: Settings, model: str, route: str, adapter: Path | None = None):
+def _student(
+    cfg: Settings,
+    model: str,
+    route: str,
+    adapter: Path | None = None,
+    model_path: Path | None = None,
+):
     if route == "fused":
         from playground.export_reader import FOUR_BIT_DIR
         from playground.lora_reader import LoraReader
 
-        if not FOUR_BIT_DIR.is_dir():
-            raise SystemExit(f"4-bit reader not found: {FOUR_BIT_DIR}")
-        return LoraReader(None, model_path=str(FOUR_BIT_DIR))
+        path = model_path or FOUR_BIT_DIR
+        if not path.is_dir():
+            raise SystemExit(f"4-bit reader not found: {path}")
+        return LoraReader(None, model_path=str(path))
     if route == "lora":
         from playground.lora_reader import LoraReader
         from playground.train import TOOLS_CHECKPOINT_DIR

@@ -93,10 +93,13 @@ def main() -> None:
         "train-next",
         help="Train the next 100 episodes on the current adapter and score that run.",
     )
-    sub.add_parser(
+    export = sub.add_parser(
         "export-reader",
         help="Fuse the reader LoRA, DWQ-quantize it, and score the 4-bit model.",
     )
+    export.add_argument("--adapter", default="")
+    export.add_argument("--bf16", default="")
+    export.add_argument("--fourbit", default="")
 
     qwen = sub.add_parser(
         "qwen",
@@ -156,7 +159,11 @@ def main() -> None:
     if args.cmd == "export-reader":
         from playground.export_reader import run_export_reader
 
-        run_export_reader()
+        run_export_reader(
+            adapter=Path(args.adapter) if args.adapter else None,
+            bf16=Path(args.bf16) if args.bf16 else None,
+            fourbit=Path(args.fourbit) if args.fourbit else None,
+        )
         return
     if args.cmd == "qwen":
         from playground.qwen_flash import run_qwen_cli

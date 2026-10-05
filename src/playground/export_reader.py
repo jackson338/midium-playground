@@ -100,7 +100,7 @@ def dwq_command(teacher: Path, dest: Path) -> list[str]:
     return [
         sys.executable,
         "-m",
-        "mlx_lm.dwq",
+        "mlx_lm.quant.dwq",
         "--model",
         str(teacher),
         "--mlx-path",
@@ -110,28 +110,75 @@ def dwq_command(teacher: Path, dest: Path) -> list[str]:
     ]
 
 
-def run_export_reader(runner=None) -> None:
+def has_weights(path: Path) -> bool:
+    if not (path / "config.json").is_file():
+        return False
+    if any(path.glob("*.safetensors")):
+        return True
+    return (path / "model.safetensors.index.json").is_file()
+
+
+def is_quantized(path: Path) -> bool:
+    if not has_weights(path):
+        return False
+    config = json.loads((path / "config.json").read_text(encoding="utf-8"))
+    return bool(config.get("quantization") or config.get("quantization_config"))
+
+
+def export_steps(bf16: Path, fourbit: Path) -> list[str]:
+    """Fuse and DWQ are skipped when their folders are already complete. Score always runs."""
+    steps = []
+    if not has_weights(bf16):
+        steps.append("fuse")
+    if not is_quantized(fourbit):
+        steps.append("dwq")
+    steps.append("score")
+    return steps
+
+
+def _rooted(path: Path) -> Path:
+    return path if path.is_absolute() else ROOT / path
+
+
+def run_export_reader(
+    runner=None,
+    adapter: Path | None = None,
+    bf16: Path | None = None,
+    fourbit: Path | None = None,
+) -> None:
     """Fuse, save F16, DWQ to 4-bit, score that model, print three rates."""
     from playground.compare_lora import print_scores, repos_present, require_saved_trace
     from playground.subswe import _rescore_file, fetch_subswe_repos, load_subswe_tasks, run_subswe, trace_path
 
-    check_adapter(ADAPTER_DIR)
+    adapter_dir = _rooted(adapter) if adapter is not None else ADAPTER_DIR
+    bf16_dir = _rooted(bf16) if bf16 is not None else BF16_DIR
+    fourbit_dir = _rooted(fourbit) if fourbit is not None else FOUR_BIT_DIR
+    check_adapter(adapter_dir)
     tasks = load_subswe_tasks()
     require_saved_trace(F16_MODEL, 1)
     require_saved_trace(LORA_MODEL, 3)
     if not repos_present(tasks):
         fetch_subswe_repos(tasks)
-    base = resolve_cached_base()
     run = runner or _run
-    BF16_DIR.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Fusing {base} into {BF16_DIR}", flush=True)
-    fuse_bf16(ADAPTER_DIR, BF16_DIR)
-    print(f"DWQ 4-bit into {FOUR_BIT_DIR}", flush=True)
-    run(dwq_command(BF16_DIR, FOUR_BIT_DIR))
+    steps = export_steps(bf16_dir, fourbit_dir)
+    if "fuse" in steps:
+        base = resolve_cached_base()
+        bf16_dir.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Fusing {base} into {bf16_dir}", flush=True)
+        fuse_bf16(adapter_dir, bf16_dir)
+    else:
+        print(f"F16 model already at {bf16_dir}", flush=True)
+    if "dwq" in steps:
+        print(f"DWQ 4-bit into {fourbit_dir}", flush=True)
+        run(dwq_command(bf16_dir, fourbit_dir))
+    else:
+        print(f"4-bit model already at {fourbit_dir}", flush=True)
     dest = trace_path(READER_4BIT_MODEL, 1)
     if dest.is_file():
         dest.unlink()
-    asyncio.run(run_subswe(settings(), READER_4BIT_MODEL, 1, grade=False))
+    asyncio.run(
+        run_subswe(settings(), READER_4BIT_MODEL, 1, grade=False, model_path=fourbit_dir)
+    )
     task_map = {task["id"]: task for task in tasks}
     print_scores(
         [
