@@ -77,12 +77,12 @@ def test_dwq_settings_are_the_high_quality_recipe():
 
     assert DWQ_BITS == 4
     assert DWQ_GROUP_SIZE == 32
-    assert DWQ_NUM_SAMPLES == 2048
+    assert DWQ_NUM_SAMPLES == 1024
     assert DWQ_VALID_SAMPLES == 32
-    assert DWQ_MAX_SEQ_LENGTH == 1025
+    assert DWQ_MAX_SEQ_LENGTH == 512
     assert DWQ_TEMPERATURE == 2.0
     assert DWQ_LEARNING_RATE == 1e-5
-    assert DWQ_BATCH_SIZE == 2
+    assert DWQ_BATCH_SIZE == 1
     assert "mlx_lm.dwq" not in inspect.getsource(export_reader)
 
 
@@ -102,6 +102,21 @@ def test_freeze_skips_a_module_without_no_grad():
     ok = _Ok()
     freeze_module(ok)
     assert ok._no_grad == {"weight"}
+
+
+def test_teacher_logits_are_reused_only_when_both_splits_exist(tmp_path):
+    from playground.dwq_vlm import DWQ_BATCH_SIZE, DWQ_MAX_SEQ_LENGTH, targets_ready
+
+    assert targets_ready(tmp_path) is False
+    (tmp_path / "train").mkdir()
+    (tmp_path / "valid").mkdir()
+    (tmp_path / "train" / "0000000000.safetensors").write_bytes(b"x")
+    (tmp_path / "valid" / "0000000000.safetensors").write_bytes(b"x")
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"batch_size": DWQ_BATCH_SIZE, "max_seq_length": DWQ_MAX_SEQ_LENGTH}),
+        encoding="utf-8",
+    )
+    assert targets_ready(tmp_path) is True
 
 
 def test_teacher_target_accepts_the_split_keyword():

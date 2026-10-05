@@ -8,18 +8,22 @@ text does not teach them.
 
 from __future__ import annotations
 
+import gc
 import json
+import os
 import shutil
+import signal
+import threading
 from pathlib import Path
 
 DWQ_BITS = 4
 DWQ_GROUP_SIZE = 32
-DWQ_NUM_SAMPLES = 2048
+DWQ_NUM_SAMPLES = 1024
 DWQ_VALID_SAMPLES = 32
-DWQ_MAX_SEQ_LENGTH = 1025
+DWQ_MAX_SEQ_LENGTH = 512
 DWQ_TEMPERATURE = 2.0
 DWQ_LEARNING_RATE = 1e-5
-DWQ_BATCH_SIZE = 2
+DWQ_BATCH_SIZE = 1
 DWQ_DATASET = "allenai/tulu-3-sft-mixture"
 
 
@@ -44,56 +48,162 @@ def validation_losses(lines: list[str]) -> tuple[float, float]:
     return found[0], found[-1]
 
 
+def targets_ready(path: Path) -> bool:
+    """A finished teacher pass wrote both splits for this batch and sequence length."""
+    marker = path / "settings.json"
+    if not marker.is_file():
+        return False
+    saved = json.loads(marker.read_text(encoding="utf-8"))
+    if saved.get("batch_size") != DWQ_BATCH_SIZE or saved.get("max_seq_length") != DWQ_MAX_SEQ_LENGTH:
+        return False
+    return any((path / "train").glob("*.safetensors")) and any((path / "valid").glob("*.safetensors"))
+
+
 def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
-    """Quantize ``teacher_dir`` and save a 4-bit VLM at ``dest`` when the loss improves."""
+    """Quantize ``teacher_dir`` and save a 4-bit VLM at ``dest`` when the loss improves.
+
+    The teacher and the student are never loaded together. Teacher logits are
+    written to disk first, then the teacher is freed before the student trains.
+    """
     import mlx.nn as nn
     import mlx.optimizers as optimizers
-    from mlx_vlm import load
     from tqdm import tqdm
 
     from playground.probe import enforce_metal_ceiling
 
+    target_dir = dest.parent / f"{dest.name}-targets"
+    stop = threading.Event()
+    threading.Thread(target=_watch_ceiling, args=(stop,), daemon=True).start()
+    try:
+        tokenizer = _teacher_pass(teacher_dir, target_dir)
+        _release_mlx()
+        student_vlm = _student_pass(nn, teacher_dir)
+        student = _TextLogits(student_vlm)
+        train_data, valid_data = _load_calibration(tokenizer)
+        _cap_wired_limit(enforce_metal_ceiling)
+        lines: list[str] = []
+        real_write = tqdm.write
+
+        def _write(*args, **kwargs):
+            lines.append(" ".join(str(arg) for arg in args))
+            return real_write(*args, **kwargs)
+
+        tqdm.write = _write
+        try:
+            from mlx_lm.quant.dwq import dwq_quantize
+
+            _checkpoint_layers(student.layers)
+            dwq_quantize(
+                student,
+                disk_target(target_dir),
+                optimizers.Adam(learning_rate=DWQ_LEARNING_RATE, bias_correction=True),
+                train_data,
+                valid_data,
+                batch_size=DWQ_BATCH_SIZE,
+                max_seq_length=DWQ_MAX_SEQ_LENGTH,
+                seed=123,
+                temperature=DWQ_TEMPERATURE,
+                gradient_checkpoint=False,
+            )
+        finally:
+            tqdm.write = real_write
+            enforce_metal_ceiling()
+        initial, final = validation_losses(lines)
+        accept_distillation(initial, final)
+        _save_quantized(student_vlm, teacher_dir, dest, initial, final)
+        print(f"DWQ 4-bit saved to {dest} (loss {initial:.4f} -> {final:.4f})", flush=True)
+    finally:
+        stop.set()
+
+
+def _teacher_pass(teacher_dir: Path, target_dir: Path):
+    from mlx_vlm import load
+
+    if targets_ready(target_dir):
+        print(f"Teacher logits already at {target_dir}", flush=True)
+        from transformers import AutoTokenizer
+
+        return AutoTokenizer.from_pretrained(str(teacher_dir))
     print(f"Loading DWQ teacher {teacher_dir}", flush=True)
     teacher_vlm, processor = load(str(teacher_dir))
+    teacher = _TextLogits(teacher_vlm)
+    tokenizer = getattr(processor, "tokenizer", processor)
+    train_data, valid_data = _load_calibration(tokenizer)
+    from mlx_lm.quant.dwq import compute_dwq_targets
+
+    print(f"Writing teacher logits to {target_dir}", flush=True)
+    compute_dwq_targets(
+        teacher,
+        target_dir,
+        train_data,
+        valid_data,
+        batch_size=DWQ_BATCH_SIZE,
+        max_seq_length=DWQ_MAX_SEQ_LENGTH,
+        seed=123,
+    )
+    (target_dir / "settings.json").write_text(
+        json.dumps(
+            {"batch_size": DWQ_BATCH_SIZE, "max_seq_length": DWQ_MAX_SEQ_LENGTH},
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    del teacher, teacher_vlm, processor
+    return tokenizer
+
+
+def _student_pass(nn, teacher_dir: Path):
+    from mlx_vlm import load
+
     print(f"Loading DWQ student {teacher_dir}", flush=True)
     student_vlm, _processor = load(str(teacher_dir))
     _quantize_all_linears(nn, student_vlm)
     safe_freeze(student_vlm)
-    teacher = _TextLogits(teacher_vlm)
-    student = _TextLogits(student_vlm)
-    tokenizer = getattr(processor, "tokenizer", processor)
-    train_data, valid_data = _load_calibration(tokenizer)
-    _cap_wired_limit(enforce_metal_ceiling)
-    lines: list[str] = []
-    real_write = tqdm.write
+    return student_vlm
 
-    def _write(*args, **kwargs):
-        lines.append(" ".join(str(arg) for arg in args))
-        return real_write(*args, **kwargs)
 
-    tqdm.write = _write
-    try:
-        from mlx_lm.quant.dwq import dwq_quantize
+def _watch_ceiling(stop: threading.Event) -> None:
+    from playground.probe import MEMORY_CEILING_BYTES, enforce_metal_ceiling, phys_footprint
 
-        dwq_quantize(
-            student,
-            teacher_target(teacher),
-            optimizers.Adam(learning_rate=DWQ_LEARNING_RATE, bias_correction=True),
-            train_data,
-            valid_data,
-            batch_size=DWQ_BATCH_SIZE,
-            max_seq_length=DWQ_MAX_SEQ_LENGTH,
-            seed=123,
-            temperature=DWQ_TEMPERATURE,
-            gradient_checkpoint=True,
-        )
-    finally:
-        tqdm.write = real_write
+    while not stop.wait(0.5):
         enforce_metal_ceiling()
-    initial, final = validation_losses(lines)
-    accept_distillation(initial, final)
-    _save_quantized(student_vlm, teacher_dir, dest, initial, final)
-    print(f"DWQ 4-bit saved to {dest} (loss {initial:.4f} -> {final:.4f})", flush=True)
+        if phys_footprint() >= MEMORY_CEILING_BYTES:
+            print("DWQ crossed the 200GB ceiling. Stopping.", flush=True)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _release_mlx() -> None:
+    import mlx.core as mx
+
+    gc.collect()
+    clear = getattr(mx, "clear_cache", None)
+    if clear is not None:
+        clear()
+        return
+    metal = getattr(mx, "metal", None)
+    if metal is not None and hasattr(metal, "clear_cache"):
+        metal.clear_cache()
+
+
+def _checkpoint_layers(layers) -> None:
+    from mlx_lm.tuner.trainer import grad_checkpoint
+
+    for layer in layers:
+        grad_checkpoint(layer)
+
+
+def disk_target(target_dir: Path):
+    """Load precomputed teacher logits. The teacher model is not in memory."""
+
+    def target_fn(batch, index, split):
+        import mlx.core as mx
+
+        del batch
+        saved = mx.load(str(target_dir / split / f"{index:010d}.safetensors"))
+        return saved["logits"], saved["indices"]
+
+    return target_fn
 
 
 def freeze_module(module) -> None:
