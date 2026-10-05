@@ -12,6 +12,7 @@
     uv run python -m playground train --context 32768 --batch-size 1
     uv run python -m playground compare-lora
     uv run python -m playground train-next
+    uv run --group mlx python -m playground qwen --prompt "Write a Python Fibonacci function."
 """
 
 from __future__ import annotations
@@ -92,6 +93,13 @@ def main() -> None:
         help="Train the next 100 episodes on the current adapter and score that run.",
     )
 
+    qwen = sub.add_parser(
+        "qwen",
+        help="Download Qwen3.8 Flash Next if needed, load it, and print one completion.",
+    )
+    qwen.add_argument("--prompt", required=True)
+    qwen.add_argument("--max-tokens", type=int, default=128)
+
     args = parser.parse_args()
     if args.cmd == "commissions":
         from playground.commissions import write_commissions
@@ -139,6 +147,11 @@ def main() -> None:
         from playground.compare_lora import run_train_next
 
         run_train_next()
+        return
+    if args.cmd == "qwen":
+        from playground.qwen_flash import run_qwen_cli
+
+        run_qwen_cli(args.prompt, args.max_tokens)
         return
 
 
