@@ -19,6 +19,7 @@ from playground.config import ROOT
 HF_REPO = "mlx-community/Qwen3.8-Flash-Next-oQ6e-mtp"
 MODEL_DIR = ROOT / "data" / "models" / "qwen3.8-flash-next-oq6e-mtp"
 _SIX_BIT_LAYOUT = (("weight", "U32"), ("scales", "BF16"), ("biases", "BF16"))
+_NGRAM_KEY = ".ple.ple_embedding.ngram_embedding."
 
 
 def unpacked_row_width(packed_cols: int, bits: int) -> int:
@@ -36,12 +37,40 @@ def ple_dir() -> Path:
     return MODEL_DIR.parent / f"{MODEL_DIR.name}-ple"
 
 
+def _weight_map(path: Path) -> dict:
+    index_path = path / "model.safetensors.index.json"
+    try:
+        index = json.loads(index_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    weight_map = index.get("weight_map") or {}
+    return weight_map if isinstance(weight_map, dict) else {}
+
+
+def index_has_resident_ngram(path: Path) -> bool:
+    return any(_NGRAM_KEY in key for key in _weight_map(path))
+
+
 def ple_ready(path: Path) -> bool:
     return (
         (path / "ple-store.json").is_file()
         and (path / "config.json").is_file()
         and (path / "model.safetensors.index.json").is_file()
+        and not index_has_resident_ngram(path)
     )
+
+
+def drop_resident_ple_keys(view: Path) -> None:
+    """Remove leftover n-gram tensors so FP8 conversion does not look for shards."""
+    index_path = view / "model.safetensors.index.json"
+    index = json.loads(index_path.read_text())
+    weight_map = index.get("weight_map") or {}
+    if not isinstance(weight_map, dict):
+        weight_map = {}
+    index["weight_map"] = {
+        key: file_name for key, file_name in weight_map.items() if _NGRAM_KEY not in key
+    }
+    index_path.write_text(json.dumps(index, indent=2) + "\n")
 
 
 def snapshot_download(repo: str, local_dir: str) -> None:
@@ -247,6 +276,7 @@ def ensure_ple_view(source: Path) -> Path:
     if view.exists():
         shutil.rmtree(view)
     ple_storage.prepare_external_ple_model(str(source), str(view))
+    drop_resident_ple_keys(view)
     return view
 
 

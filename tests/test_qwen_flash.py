@@ -12,6 +12,29 @@ def _ready(path):
     (path / "model.safetensors.index.json").write_text("{}")
 
 
+def test_stale_ple_view_drops_ngram_scales(tmp_path):
+    view = tmp_path / "qwen-ple"
+    view.mkdir()
+    (view / "ple-store.json").write_text("{}\n")
+    (view / "config.json").write_text("{}\n")
+    scale = "language_model.model.layers.1.ple.ple_embedding.ngram_embedding.weight_scale"
+    index = {
+        "weight_map": {
+            scale: "model-00001-of-00028.safetensors",
+            "language_model.model.embed_tokens.weight": "model-00002-of-00028.safetensors",
+        }
+    }
+    (view / "model.safetensors.index.json").write_text(json.dumps(index))
+    assert qwen_flash.ple_ready(view) is False
+    qwen_flash.drop_resident_ple_keys(view)
+    kept = json.loads((view / "model.safetensors.index.json").read_text())["weight_map"]
+    assert scale not in kept
+    assert kept == {
+        "language_model.model.embed_tokens.weight": "model-00002-of-00028.safetensors"
+    }
+    assert qwen_flash.ple_ready(view) is True
+
+
 def test_unpacked_row_width_uses_bits():
     assert qwen_flash.unpacked_row_width(30, 6) == 160
     assert qwen_flash.unpacked_row_width(20, 4) == 160
