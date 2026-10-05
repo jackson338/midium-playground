@@ -1,0 +1,83 @@
+import json
+
+import pytest
+
+from playground.export_reader import (
+    BASE_COMMIT,
+    BASE_MODEL,
+    check_adapter,
+    dwq_command,
+    fuse_command,
+)
+from playground.compare_lora import print_scores
+from playground.subswe import F16_MODEL, LORA_MODEL, READER_4BIT_MODEL, trace_path
+
+
+def _adapter(tmp_path, base: str = BASE_MODEL, commit: str = BASE_COMMIT):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "adapters.safetensors").write_bytes(b"weights")
+    (tmp_path / "adapter_config.json").write_text(
+        json.dumps(
+            {
+                "base_model_name_or_path": base,
+                "base_model_commit_hash": commit,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_missing_adapter_is_refused(tmp_path):
+    with pytest.raises(SystemExit, match="not found"):
+        check_adapter(tmp_path / "missing")
+
+
+def test_wrong_base_is_refused(tmp_path):
+    path = _adapter(tmp_path / "adapter", base="google/gemma-4-e4b-it")
+    with pytest.raises(SystemExit, match="Adapter base"):
+        check_adapter(path)
+
+
+def test_commands_fuse_then_dwq_the_saved_f16_model(tmp_path):
+    adapter = tmp_path / "adapter"
+    bf16 = tmp_path / "bf16"
+    four = tmp_path / "four"
+    fuse = fuse_command("/cache/gemma", adapter, bf16)
+    dwq = dwq_command(bf16, four)
+    assert fuse[2] == "mlx_vlm.fuse"
+    assert "/cache/gemma" in fuse
+    assert str(adapter) in fuse
+    assert str(bf16) in fuse
+    assert dwq[2] == "mlx_lm.dwq"
+    assert "--bits" in dwq and "4" in dwq
+    assert str(bf16) in dwq
+    assert str(four) in dwq
+
+
+def test_head_to_head_lists_three_pass_rates(capsys):
+    def row(model: str, rate: float, run: int) -> dict:
+        return {
+            "model": model,
+            "run": run,
+            "pass_rate": rate,
+            "passed": 1,
+            "attempted": 40,
+            "call_count": 10,
+            "by_kind": {"locate": {"passed": 1, "attempted": 6}},
+            "tasks": [],
+        }
+
+    print_scores(
+        [
+            row(F16_MODEL, 0.65, 1),
+            row(LORA_MODEL, 0.775, 3),
+            row(READER_4BIT_MODEL, 0.75, 1),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert f"{F16_MODEL}: pass_rate=0.65" in out
+    assert f"{LORA_MODEL}: pass_rate=0.775" in out
+    assert f"{READER_4BIT_MODEL}: pass_rate=0.75" in out
+    assert "average" not in out.lower()
+    assert trace_path(READER_4BIT_MODEL, 1).name == "gemma-4-e4b-reader-4bit.run1.jsonl"

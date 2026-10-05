@@ -85,10 +85,11 @@ def _tool_payload(visible: str) -> dict | None:
 
 
 class LoraReader:
-    def __init__(self, adapter: Path | None):
+    def __init__(self, adapter: Path | None, model_path: str | None = None):
         if adapter is not None and not adapter.is_dir():
             raise SystemExit(f"LoRA adapter not found: {adapter}")
         self.adapter = adapter
+        self.model_path = model_path
         self._model = None
         self._processor = None
         self._stopped = False
@@ -105,7 +106,7 @@ class LoraReader:
             message, self._stopped = next_turn("", True)
             return message
         if self._model is None:
-            self._model, self._processor = load_lora(self.adapter)
+            self._model, self._processor = load_lora(self.adapter, self.model_path)
         prompt = render_prompt(self._processor, messages, tools)
         raw = generate_continuation(self._model, self._processor, prompt)
         message, self._stopped = next_turn(completion_only(prompt, raw), False)
@@ -126,14 +127,14 @@ def render_prompt(processor, messages: list[dict], tools: list[dict] | None) -> 
     return text
 
 
-def load_lora(adapter: Path | None):
+def load_lora(adapter: Path | None, model_path: str | None = None):
     from playground.probe import _require_unsloth
 
     _require_unsloth()
     from mlx_vlm import load
 
     kwargs = {"adapter_path": str(adapter)} if adapter is not None else {}
-    model, processor = load(MODEL_NAME, **kwargs)
+    model, processor = load(model_path or MODEL_NAME, **kwargs)
     enforce_metal_ceiling()
     return model, processor
 

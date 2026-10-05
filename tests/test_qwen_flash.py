@@ -35,6 +35,36 @@ def test_stale_ple_view_drops_ngram_scales(tmp_path):
     assert qwen_flash.ple_ready(view) is True
 
 
+def test_sanitize_drops_ngram_scale_before_fp8():
+    seen = {}
+
+    def original(self, weights):
+        del self
+        seen.update(weights)
+        return weights
+
+    class Text:
+        ple_storage = {"manifest": "ple-store.json"}
+
+    class Config:
+        text_config = Text()
+
+    class Model:
+        config = Config()
+
+    scale = "language_model.model.layers.1.ple.ple_embedding.ngram_embedding.weight_scale"
+    wrapped = qwen_flash.sanitize_without_resident_ngram(original)
+    wrapped(
+        Model(),
+        {
+            scale: "scale",
+            "language_model.model.embed_tokens.weight": "embed",
+        },
+    )
+    assert scale not in seen
+    assert seen == {"language_model.model.embed_tokens.weight": "embed"}
+
+
 def test_unpacked_row_width_uses_bits():
     assert qwen_flash.unpacked_row_width(30, 6) == 160
     assert qwen_flash.unpacked_row_width(20, 4) == 160

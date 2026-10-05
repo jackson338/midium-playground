@@ -12,6 +12,7 @@
     uv run python -m playground train --context 32768 --batch-size 1
     uv run python -m playground compare-lora
     uv run python -m playground train-next
+    uv run python -m playground export-reader
     uv run --group mlx python -m playground qwen --prompt "Write a Python Fibonacci function."
 """
 
@@ -92,6 +93,10 @@ def main() -> None:
         "train-next",
         help="Train the next 100 episodes on the current adapter and score that run.",
     )
+    sub.add_parser(
+        "export-reader",
+        help="Fuse the reader LoRA, DWQ-quantize it, and score the 4-bit model.",
+    )
 
     qwen = sub.add_parser(
         "qwen",
@@ -147,6 +152,11 @@ def main() -> None:
         from playground.compare_lora import run_train_next
 
         run_train_next()
+        return
+    if args.cmd == "export-reader":
+        from playground.export_reader import run_export_reader
+
+        run_export_reader()
         return
     if args.cmd == "qwen":
         from playground.qwen_flash import run_qwen_cli

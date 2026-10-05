@@ -60,6 +60,30 @@ def ple_ready(path: Path) -> bool:
     )
 
 
+def omit_resident_ngram(weights: dict) -> dict:
+    return {key: value for key, value in weights.items() if _NGRAM_KEY not in key}
+
+
+def ple_storage_enabled(config) -> bool:
+    text = getattr(config, "text_config", None)
+    if text is None and isinstance(config, dict):
+        text = config.get("text_config")
+    if isinstance(text, dict):
+        return bool(text.get("ple_storage"))
+    return bool(getattr(text, "ple_storage", None))
+
+
+def sanitize_without_resident_ngram(original):
+    """Drop n-gram tensors before FP8 conversion. Shard files still contain the scales."""
+
+    def sanitize(self, weights):
+        if ple_storage_enabled(self.config):
+            weights = omit_resident_ngram(weights)
+        return original(self, weights)
+
+    return sanitize
+
+
 def drop_resident_ple_keys(view: Path) -> None:
     """Remove leftover n-gram tensors so FP8 conversion does not look for shards."""
     index_path = view / "model.safetensors.index.json"
@@ -332,17 +356,21 @@ def load_lenient(model_path: str):
     """mlx_vlm.load declares strict and does not forward it. Force it for one call."""
     import mlx.nn as nn
     from mlx_vlm import load
+    from mlx_vlm.models.qwen4_exp import qwen4_exp
 
-    original = nn.Module.load_weights
+    original_load = nn.Module.load_weights
+    original_sanitize = qwen4_exp.Model.sanitize
 
     def lenient(self, weights, strict=True):
-        return original(self, weights, strict=False)
+        return original_load(self, weights, strict=False)
 
     nn.Module.load_weights = lenient
+    qwen4_exp.Model.sanitize = sanitize_without_resident_ngram(original_sanitize)
     try:
         return load(model_path)
     finally:
-        nn.Module.load_weights = original
+        nn.Module.load_weights = original_load
+        qwen4_exp.Model.sanitize = original_sanitize
 
 
 def render_prompt(processor, prompt: str, model_dir: Path) -> str:

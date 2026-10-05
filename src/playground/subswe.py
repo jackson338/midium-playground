@@ -36,6 +36,7 @@ PUBLISHED_MODELS: tuple[tuple[str, str, int], ...] = (
 )
 LORA_MODEL = "Gemma 4 E4B LoRA"
 F16_MODEL = "Gemma 4 E4B F16"
+READER_4BIT_MODEL = "Gemma 4 E4B Reader 4bit"
 
 
 def load_subswe_tasks() -> list[dict]:
@@ -50,12 +51,14 @@ def trace_path(model: str, run: int) -> Path:
 
 
 def model_spec(model: str) -> tuple[str, int]:
+    if model == READER_4BIT_MODEL:
+        return "fused", 1
     if model in {LORA_MODEL, F16_MODEL}:
         return "lora", 1
     for name, route, concurrency in PUBLISHED_MODELS:
         if name == model:
             return route, concurrency
-    known = ", ".join([*(name for name, _, _ in PUBLISHED_MODELS), F16_MODEL, LORA_MODEL])
+    known = ", ".join([*(name for name, _, _ in PUBLISHED_MODELS), F16_MODEL, LORA_MODEL, READER_4BIT_MODEL])
     raise SystemExit(f"Unknown SubSWE model {model!r}. Choose one of: {known}")
 
 
@@ -330,6 +333,13 @@ async def _grade(grader: MidiumCloud, task: dict, report: str) -> dict:
 
 
 def _student(cfg: Settings, model: str, route: str, adapter: Path | None = None):
+    if route == "fused":
+        from playground.export_reader import FOUR_BIT_DIR
+        from playground.lora_reader import LoraReader
+
+        if not FOUR_BIT_DIR.is_dir():
+            raise SystemExit(f"4-bit reader not found: {FOUR_BIT_DIR}")
+        return LoraReader(None, model_path=str(FOUR_BIT_DIR))
     if route == "lora":
         from playground.lora_reader import LoraReader
         from playground.train import TOOLS_CHECKPOINT_DIR

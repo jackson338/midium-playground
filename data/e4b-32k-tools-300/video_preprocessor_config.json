@@ -1,0 +1,22 @@
+{
+  "default_fps": 2.0,
+  "do_normalize": true,
+  "do_rescale": true,
+  "do_resize": true,
+  "image_mean": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "image_std": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "max_soft_tokens": 70,
+  "num_frames": 32,
+  "patch_size": 16,
+  "pooling_kernel_size": 3,
+  "rescale_factor": 0.00392156862745098,
+  "video_processor_type": "Gemma4VideoProcessor"
+}

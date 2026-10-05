@@ -1,0 +1,8 @@
+{
+  "status": "finished",
+  "context": 32768,
+  "examples": 100,
+  "tokens": 1675984,
+  "peak_bytes": 155266907736,
+  "ceiling_bytes": 214748364800
+}
