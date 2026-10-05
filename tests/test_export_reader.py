@@ -2,13 +2,15 @@ import json
 
 import pytest
 
+import inspect
+
 from playground.export_reader import (
     BASE_COMMIT,
     BASE_MODEL,
     check_adapter,
     dwq_command,
-    fuse_command,
 )
+import playground.export_reader as export_reader
 from playground.compare_lora import print_scores
 from playground.subswe import F16_MODEL, LORA_MODEL, READER_4BIT_MODEL, trace_path
 
@@ -58,16 +60,14 @@ def test_wrong_base_is_refused(tmp_path):
         check_adapter(path)
 
 
-def test_commands_fuse_then_dwq_the_saved_f16_model(tmp_path):
-    adapter = tmp_path / "adapter"
+def test_fuse_does_not_call_mlx_vlm_fuse():
+    assert "mlx_vlm.fuse" not in inspect.getsource(export_reader)
+
+
+def test_dwq_uses_the_fused_f16_folder(tmp_path):
     bf16 = tmp_path / "bf16"
     four = tmp_path / "four"
-    fuse = fuse_command("/cache/gemma", adapter, bf16)
     dwq = dwq_command(bf16, four)
-    assert fuse[2] == "mlx_vlm.fuse"
-    assert "/cache/gemma" in fuse
-    assert str(adapter) in fuse
-    assert str(bf16) in fuse
     assert dwq[2] == "mlx_lm.dwq"
     assert "--bits" in dwq and "4" in dwq
     assert str(bf16) in dwq

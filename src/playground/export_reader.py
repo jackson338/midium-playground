@@ -76,18 +76,24 @@ def resolve_cached_base() -> str:
     return local_gemma_snapshot(Path(HF_HUB_CACHE))
 
 
-def fuse_command(base: str, adapter: Path, dest: Path) -> list[str]:
-    return [
-        sys.executable,
-        "-m",
-        "mlx_vlm.fuse",
-        "--model",
-        base,
-        "--adapter-path",
-        str(adapter),
-        "--save-path",
-        str(dest),
-    ]
+def fuse_bf16(adapter: Path, dest: Path) -> None:
+    """Merge the LoRA with Unsloth. mlx-vlm has no fuse module."""
+    from unsloth import FastModel
+
+    model, tokenizer = FastModel.from_pretrained(
+        model_name=str(adapter),
+        max_seq_length=32768,
+        load_in_4bit=False,
+        full_finetuning=False,
+    )
+    save = getattr(model, "save_pretrained_merged", None)
+    if save is None:
+        raise SystemExit("This Unsloth build cannot merge an MLX LoRA.")
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        save(str(dest), tokenizer, save_method="merged_16bit")
+    except TypeError:
+        save(str(dest), tokenizer)
 
 
 def dwq_command(teacher: Path, dest: Path) -> list[str]:
@@ -118,8 +124,8 @@ def run_export_reader(runner=None) -> None:
     base = resolve_cached_base()
     run = runner or _run
     BF16_DIR.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Fusing into {BF16_DIR}", flush=True)
-    run(fuse_command(base, ADAPTER_DIR, BF16_DIR))
+    print(f"Fusing {base} into {BF16_DIR}", flush=True)
+    fuse_bf16(ADAPTER_DIR, BF16_DIR)
     print(f"DWQ 4-bit into {FOUR_BIT_DIR}", flush=True)
     run(dwq_command(BF16_DIR, FOUR_BIT_DIR))
     dest = trace_path(READER_4BIT_MODEL, 1)
