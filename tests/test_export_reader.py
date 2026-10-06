@@ -81,7 +81,7 @@ def test_dwq_settings_are_the_high_quality_recipe():
     assert DWQ_VALID_SAMPLES == 32
     assert DWQ_MAX_SEQ_LENGTH == 512
     assert DWQ_TEMPERATURE == 2.0
-    assert DWQ_LEARNING_RATE == 1e-5
+    assert DWQ_LEARNING_RATE == 1e-6
     assert DWQ_BATCH_SIZE == 1
     assert "mlx_lm.dwq" not in inspect.getsource(export_reader)
 
@@ -130,6 +130,21 @@ def test_teacher_logits_are_reused_only_when_both_splits_exist(tmp_path):
         encoding="utf-8",
     )
     assert targets_ready(tmp_path) is True
+
+
+def test_lowest_validation_point_includes_the_starting_scales():
+    import inspect
+
+    from playground.dwq_vlm import lower_validation, run_vlm_dwq
+
+    point = lower_validation(None, 0, 0.112)
+    point = lower_validation(point, 799, 0.326)
+    point = lower_validation(point, 1023, 0.339)
+    assert point == (0, 0.112)
+    assert lower_validation(point, 400, 0.090) == (400, 0.090)
+    source = inspect.getsource(run_vlm_dwq)
+    assert "distill_scales" in source
+    assert "dwq_quantize" not in source
 
 
 def test_teacher_target_accepts_the_split_keyword():

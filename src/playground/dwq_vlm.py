@@ -1,9 +1,9 @@
 """Distill a 4-bit Gemma 4 VLM from a fused bf16 teacher.
 
-mlx-lm's DWQ command only loads text models. This runs the same loss,
-``dwq_quantize`` and ``kl_div_loss``, on the language, vision, and audio
-towers of the fused VLM. Vision and audio are quantized. The calibration
-text does not teach them.
+mlx-lm's DWQ command only loads text models. This runs the same KL loss
+on the language, vision, and audio towers of the fused VLM, and keeps the
+4-bit scales from the lowest validation point. Vision and audio are
+quantized. The calibration text does not teach them.
 """
 
 from __future__ import annotations
@@ -22,10 +22,17 @@ DWQ_NUM_SAMPLES = 1024
 DWQ_VALID_SAMPLES = 32
 DWQ_MAX_SEQ_LENGTH = 512
 DWQ_TEMPERATURE = 2.0
-DWQ_LEARNING_RATE = 1e-5
+DWQ_LEARNING_RATE = 1e-6
 DWQ_BATCH_SIZE = 1
 DWQ_SEED = 123
 DWQ_DATASET = "allenai/tulu-3-sft-mixture"
+
+
+def lower_validation(best: tuple[int, float] | None, step: int, loss: float) -> tuple[int, float]:
+    """Keep the lowest validation loss. Step 0 is the untouched 4-bit scales."""
+    if best is None or loss < best[1]:
+        return step, loss
+    return best
 
 
 def accept_distillation(initial_loss: float, final_loss: float) -> None:
@@ -65,14 +72,12 @@ def targets_ready(path: Path) -> bool:
 
 
 def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
-    """Quantize ``teacher_dir`` and save a 4-bit VLM at ``dest`` when the loss improves.
+    """Quantize ``teacher_dir`` and save a 4-bit VLM at ``dest``.
 
-    The teacher and the student are never loaded together. Teacher logits are
-    written to disk first, then the teacher is freed before the student trains.
+    The saved scales are the lowest validation point. That is the untouched
+    4-bit start when training does not improve it.
     """
     import mlx.nn as nn
-    import mlx.optimizers as optimizers
-    from tqdm import tqdm
 
     from playground.probe import enforce_metal_ceiling
 
@@ -85,39 +90,23 @@ def run_vlm_dwq(teacher_dir: Path, dest: Path) -> None:
         student_vlm = _student_pass(nn, teacher_dir)
         student = _TextLogits(student_vlm)
         train_data, valid_data = _load_calibration(tokenizer)
-        _cap_wired_limit(enforce_metal_ceiling)
-        lines: list[str] = []
-        real_write = tqdm.write
-
-        def _write(*args, **kwargs):
-            lines.append(" ".join(str(arg) for arg in args))
-            return real_write(*args, **kwargs)
-
-        tqdm.write = _write
+        enforce_metal_ceiling()
         try:
-            import mlx_lm.quant.dwq as dwq_mod
-
-            _guard_trainable_count(dwq_mod)
             _checkpoint_layers(student.layers)
-            dwq_mod.dwq_quantize(
+            initial, best, best_step = distill_scales(
                 student,
                 disk_target(target_dir),
-                optimizers.Adam(learning_rate=DWQ_LEARNING_RATE, bias_correction=True),
                 train_data,
                 valid_data,
-                batch_size=DWQ_BATCH_SIZE,
-                max_seq_length=DWQ_MAX_SEQ_LENGTH,
-                seed=DWQ_SEED,
-                temperature=DWQ_TEMPERATURE,
-                gradient_checkpoint=False,
             )
         finally:
-            tqdm.write = real_write
             enforce_metal_ceiling()
-        initial, final = validation_losses(lines)
-        accept_distillation(initial, final)
-        _save_quantized(student_vlm, teacher_dir, dest, initial, final)
-        print(f"DWQ 4-bit saved to {dest} (loss {initial:.4f} -> {final:.4f})", flush=True)
+        accept_distillation(initial, best)
+        _save_quantized(student_vlm, teacher_dir, dest, initial, best, best_step)
+        print(
+            f"DWQ 4-bit saved to {dest} (loss {initial:.4f} -> {best:.4f} at step {best_step})",
+            flush=True,
+        )
     finally:
         stop.set()
 
@@ -278,14 +267,145 @@ def _quantize_all_linears(nn, model) -> None:
     nn.quantize(model, **kwargs)
 
 
-def _guard_trainable_count(dwq_mod) -> None:
-    original = dwq_mod.print_trainable_parameters
+def distill_scales(model, target_fn, train_data, valid_data) -> tuple[float, float, int]:
+    """Train 4-bit scales and restore the lowest validation point, including step 0.
 
-    def guarded(model):
-        original(model)
-        refuse_full_finetune(model)
+    The loss matches mlx-lm 0.31.3 ``dwq_quantize``: temperature-scaled KL against
+    the teacher's saved top-1024 logits. A later step that is worse is not saved.
+    """
+    import time
 
-    dwq_mod.print_trainable_parameters = guarded
+    import mlx.core as mx
+    import mlx.nn as nn
+    import mlx.optimizers as optimizers
+    from mlx.utils import tree_map
+    from mlx_lm.tuner.losses import kl_div_loss
+    from mlx_lm.tuner.trainer import iterate_batches
+    from mlx_lm.tuner.utils import print_trainable_parameters
+    from tqdm import tqdm
+
+    def unfreeze(_prefix, module):
+        if (
+            hasattr(module, "bits")
+            and hasattr(module, "group_size")
+            and getattr(module, "mode", None) == "affine"
+            and module.bits < 8
+        ):
+            module.unfreeze(keys=["scales", "biases"], recurse=False)
+
+    model.train()
+    model.apply_to_modules(unfreeze)
+    print_trainable_parameters(model)
+    refuse_full_finetune(model)
+
+    group = mx.distributed.init()
+    world_size = group.size()
+    scale = 1 / DWQ_TEMPERATURE
+    opt = optimizers.Adam(learning_rate=DWQ_LEARNING_RATE, bias_correction=True)
+
+    def loss_fn(params, tokens, targets, lengths):
+        model.update(tree_map(lambda value: value.astype(mx.bfloat16), params))
+        logits = model(tokens)
+        if isinstance(targets, tuple):
+            targets, ids = targets
+            logits = mx.take_along_axis(logits, ids, axis=-1)
+        losses = kl_div_loss(scale * logits, scale * targets)
+        mask = mx.arange(1, 1 + targets.shape[1]) < lengths[:, 1:]
+        ntoks = mask.sum()
+        loss = (mask * losses).sum() / ntoks
+        return loss, ntoks
+
+    def step(tokens, targets, lengths, params):
+        (loss, ntoks), grads = mx.value_and_grad(loss_fn)(params, tokens, targets, lengths)
+        grads = nn.average_gradients(grads)
+        params = opt.apply_gradients(grads, params)
+        return loss, ntoks, params
+
+    def validate(params, step_index):
+        total_loss = 0.0
+        total_tokens = 0
+        batches = iterate_batches(valid_data, DWQ_BATCH_SIZE, DWQ_MAX_SEQ_LENGTH, seed=DWQ_SEED)
+        for index, (batch, lengths) in tqdm(
+            enumerate(batches),
+            total=len(valid_data) // DWQ_BATCH_SIZE,
+            desc="Computing validation loss",
+            leave=False,
+        ):
+            batch = batch[:, :-1]
+            targets = target_fn(batch, index, split="valid")
+            mx.eval(targets)
+            loss, ntoks = loss_fn(params, batch, targets, lengths)
+            mx.eval(loss, ntoks)
+            loss = mx.distributed.all_sum(loss, stream=mx.cpu).item() / world_size
+            ntoks = mx.distributed.all_sum(ntoks, stream=mx.cpu).item()
+            total_tokens += ntoks
+            total_loss += loss * ntoks
+        mean = total_loss / total_tokens
+        tqdm.write(f"Validation: it={step_index}, loss={mean:.3f}")
+        return mean
+
+    def snapshot(params):
+        copied = tree_map(lambda value: mx.array(value), params)
+        mx.eval(copied)
+        return copied
+
+    params = tree_map(lambda value: value.astype(mx.float32), model.trainable_parameters())
+    tracked: tuple[int, float] | None = None
+    best_params = None
+
+    def note(step_index, loss, current):
+        nonlocal tracked, best_params
+        chosen = lower_validation(tracked, step_index, loss)
+        if chosen != tracked:
+            tracked = chosen
+            best_params = snapshot(current)
+            tqdm.write(f"Best validation so far: it={step_index}, loss={loss:.3f}")
+
+    initial = validate(params, 0)
+    note(0, initial, params)
+
+    total_loss = 0.0
+    total_tokens = 0
+    window_tokens = 0
+    started = time.time()
+    last_index = 0
+    batches = iterate_batches(train_data, DWQ_BATCH_SIZE, DWQ_MAX_SEQ_LENGTH, seed=DWQ_SEED)
+    progress = tqdm(enumerate(batches), total=len(train_data) // DWQ_BATCH_SIZE)
+    for it, (batch, lengths) in progress:
+        last_index = it
+        batch = batch[:, :-1]
+        targets = target_fn(batch, it, split="train")
+        mx.eval(targets)
+        loss, ntoks, params = step(batch, targets, lengths, params)
+        mx.eval(loss, params)
+        loss = mx.distributed.all_sum(loss, stream=mx.cpu).item() / world_size
+        ntoks = mx.distributed.all_sum(ntoks, stream=mx.cpu).item()
+        window_tokens += ntoks
+        total_loss += loss * ntoks
+        progress.set_description(desc=f"{loss=:.4f}")
+        if (it + 1) % 20 == 0:
+            elapsed = time.time() - started
+            avg_loss = total_loss / window_tokens
+            total_tokens += window_tokens
+            tqdm.write(
+                f"it={it}, avg_loss={avg_loss:.4f}, total_tokens={total_tokens}, "
+                f"toks_per_sec={window_tokens / elapsed:.3f}, "
+                f"peak_memory_gb={mx.get_peak_memory() / 1e9:.3f}"
+            )
+            started = time.time()
+            window_tokens = 0
+            total_loss = 0.0
+        if (it + 1) % 200 == 0:
+            note(it, validate(params, it), params)
+
+    final = validate(params, last_index)
+    note(last_index, final, params)
+    if tracked is None or best_params is None:
+        raise SystemExit("DWQ did not record a validation loss.")
+    best_step, best_loss = tracked
+    model.update(tree_map(lambda value: value.astype(mx.bfloat16), best_params))
+    tqdm.write(f"Restoring the best validation point it={best_step}, loss={best_loss:.3f}")
+    return initial, best_loss, best_step
 
 
 def _load_calibration(tokenizer):
@@ -302,20 +422,6 @@ def _load_calibration(tokenizer):
         DWQ_MAX_SEQ_LENGTH,
         num_valid_samples=DWQ_VALID_SAMPLES,
     )
-
-
-def _cap_wired_limit(enforce_metal_ceiling) -> None:
-    import mlx_lm.quant.dwq as dwq_mod
-
-    def capped():
-        from mlx_lm.utils import maybe_set_recommended_wired_limit
-
-        try:
-            maybe_set_recommended_wired_limit()
-        finally:
-            enforce_metal_ceiling()
-
-    dwq_mod.maybe_set_recommended_wired_limit = capped
 
 
 class _TextLogits:
@@ -353,7 +459,14 @@ def _forward_text(model, token_ids):
     return out
 
 
-def _save_quantized(model, source: Path, dest: Path, initial: float, final: float) -> None:
+def _save_quantized(
+    model,
+    source: Path,
+    dest: Path,
+    initial: float,
+    best: float,
+    best_step: int,
+) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
@@ -383,6 +496,8 @@ def _save_quantized(model, source: Path, dest: Path, initial: float, final: floa
         "batch_size": DWQ_BATCH_SIZE,
         "dataset": DWQ_DATASET,
         "initial_loss": initial,
-        "final_loss": final,
+        "best_loss": best,
+        "best_step": best_step,
+        "final_loss": best,
     }
     (dest / "dwq.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
